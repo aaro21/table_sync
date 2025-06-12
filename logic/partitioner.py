@@ -1,3 +1,5 @@
+"""Example script showing how to iterate over configured partitions."""
+
 from logic.partitioner import get_partitions
 
 for part in get_partitions(config):

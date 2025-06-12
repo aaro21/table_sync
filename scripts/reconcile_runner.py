@@ -1,3 +1,5 @@
+"""Command line entry point for running table reconciliation."""
+
 from logic.config_loader import load_config
 from connectors.oracle_connector import get_oracle_connection
 from connectors.sqlserver_connector import get_sqlserver_connection
@@ -72,3 +74,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

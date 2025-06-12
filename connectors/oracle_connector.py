@@ -1,7 +1,10 @@
+"""Utility for creating Oracle database connections."""
+
 import cx_Oracle
 
 
 def get_oracle_connection(env: dict):
+    """Return a :class:`cx_Oracle.Connection` using environment settings."""
     user = env["user"]
     password = env["password"]
     host = env["host"]

@@ -1,3 +1,4 @@
+# Example configuration for reconciling Oracle to SQL Server tables
 source:
   type: oracle
   env:
