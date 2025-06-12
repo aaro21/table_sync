@@ -1,5 +1,8 @@
 
 
+"""Query helpers used by the reconciliation runner."""
+
+
 def fetch_rows(conn, table: str, columns: dict, partition: dict, primary_key: str) -> dict:
     """
     Fetches rows from a table filtered by year and month, returning a dict keyed by primary key.

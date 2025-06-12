@@ -1,4 +1,4 @@
-
+"""Output utilities for writing discrepancy reports."""
 
 import csv
 import os

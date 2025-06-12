@@ -1,3 +1,6 @@
+"""Functions for comparing row dictionaries between databases."""
+
+
 def compare_rows(source_row: dict, dest_row: dict, column_map: dict) -> list[dict]:
     """
     Compares two rows column-by-column using the logical column names.

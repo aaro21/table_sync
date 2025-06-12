@@ -1,9 +1,11 @@
 
+"""Helpers for connecting to Microsoft SQL Server."""
 
 import pyodbc
 
 
 def get_sqlserver_connection(env: dict):
+    """Create and return a :class:`pyodbc.Connection` using environment data."""
     driver = env["driver"]
     server = env["server"]
     database = env["database"]
