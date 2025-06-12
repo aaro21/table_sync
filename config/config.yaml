@@ -1,0 +1,44 @@
+source:
+  type: oracle
+  env:
+    user: ORACLE_USER
+    password: ORACLE_PASSWORD
+    host: ORACLE_HOST
+    port: ORACLE_PORT
+    service: ORACLE_SERVICE
+  table: source_table_name  # environment-specific name
+  columns:
+    id: id
+    year: year
+    month: month
+    data_column_1: src_col_1
+    data_column_2: src_col_2
+
+destination:
+  type: sqlserver
+  env:
+    driver: SQLSERVER_DRIVER
+    server: SQLSERVER_SERVER
+    database: SQLSERVER_DATABASE
+    trusted_connection: SQLSERVER_TRUSTED
+    trust_server_certificate: SQLSERVER_TRUST_SERVER_CERT
+  table: destination_table_name  # environment-specific name
+  columns:
+    id: id
+    year: year
+    month: month
+    data_column_1: dest_col_1
+    data_column_2: dest_col_2
+
+primary_key: id
+
+partitioning:
+  year_column: year
+  month_column: month
+  scope:
+    - { year: 2024, month: 1 }
+    - { year: 2024, month: 2 }
+
+output:
+  format: csv
+  path: "output/discrepancies.csv"
