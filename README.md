@@ -6,7 +6,7 @@ configuration file defines the source and destination schemas and tables,
 column mappings and a simple partitioning scheme. The included Python scripts
 load this configuration, connect to both databases, fetch rows for each
 partition and compare them column by column. Any discrepancies are
-written to a CSV report.
+written to a table on the destination SQL Server.
 
 ## Structure
 
@@ -30,7 +30,7 @@ written to a CSV report.
    ```bash
    python scripts/reconcile_runner.py
    ```
-   Discrepancies will be written to the path specified in the config
+   Discrepancies will be written to the table specified in the config
    file.
 
 This repository is intentionally minimal and focuses only on the core
