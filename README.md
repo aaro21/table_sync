@@ -33,6 +33,9 @@ written to a table on the destination SQL Server.
    Discrepancies will be written to the table specified in the config
    file.
 
+Passing the `--debug` flag or setting `debug: true` in the YAML
+configuration enables verbose logging useful during development.
+
 This repository is intentionally minimal and focuses only on the core
 logic for comparing tables. Many features are missing, including retry
 logic, logging and tests.

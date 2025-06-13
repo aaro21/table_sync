@@ -1,5 +1,7 @@
 """Command line entry point for running table reconciliation."""
 
+import argparse
+
 from logic.config_loader import load_config
 from connectors.oracle_connector import get_oracle_connection
 from connectors.sqlserver_connector import get_sqlserver_connection
@@ -7,10 +9,17 @@ from logic.partitioner import get_partitions
 from runners.reconcile import fetch_rows
 from logic.comparator import compare_rows
 from logic.reporter import DiscrepancyWriter
+from utils.logger import debug_log
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--debug", action="store_true", help="enable debug logs")
+    args = parser.parse_args()
+
     config = load_config()
+    if args.debug:
+        config["debug"] = True
 
     src_env = config["source"]["resolved_env"]
     dest_env = config["destination"]["resolved_env"]
@@ -32,22 +41,47 @@ def main():
     dest_dialect = config["destination"].get("type", "sqlserver").lower()
     use_row_hash = config.get("comparison", {}).get("use_row_hash", False)
 
-    with get_oracle_connection(src_env) as src_conn, get_sqlserver_connection(dest_env) as dest_conn:
+    with get_oracle_connection(src_env, config) as src_conn, get_sqlserver_connection(dest_env, config) as dest_conn:
         writer = DiscrepancyWriter(dest_conn, output_schema, output_table)
 
         for partition in get_partitions(config):
-            print(f"Checking partition: {partition}")
+            debug_log(f"Partition: {partition}", config)
 
-            src_rows = list(fetch_rows(
-                src_conn, src_schema, src_table, src_cols, partition,
-                primary_key, year_column, month_column, dialect=src_dialect,
-                week_column=week_column
-            ))
-            dest_rows = list(fetch_rows(
-                dest_conn, dest_schema, dest_table, dest_cols, partition,
-                primary_key, year_column, month_column, dialect=dest_dialect,
-                week_column=week_column
-            ))
+            src_rows = list(
+                fetch_rows(
+                    src_conn,
+                    src_schema,
+                    src_table,
+                    src_cols,
+                    partition,
+                    primary_key,
+                    year_column,
+                    month_column,
+                    dialect=src_dialect,
+                    week_column=week_column,
+                    config=config,
+                )
+            )
+            dest_rows = list(
+                fetch_rows(
+                    dest_conn,
+                    dest_schema,
+                    dest_table,
+                    dest_cols,
+                    partition,
+                    primary_key,
+                    year_column,
+                    month_column,
+                    dialect=dest_dialect,
+                    week_column=week_column,
+                    config=config,
+                )
+            )
+
+            debug_log(
+                f"Fetched {len(src_rows)} source rows and {len(dest_rows)} destination rows",
+                config,
+            )
 
             src_iter = iter(src_rows)
             dest_iter = iter(dest_rows)
@@ -60,7 +94,13 @@ def main():
                 dest_key = dest_row[primary_key] if dest_row else None
 
                 if src_row and dest_row and src_key == dest_key:
-                    diffs = compare_rows(src_row, dest_row, src_cols, use_row_hash=use_row_hash)
+                    diffs = compare_rows(
+                        src_row,
+                        dest_row,
+                        src_cols,
+                        use_row_hash=use_row_hash,
+                        config=config,
+                    )
                     for diff in diffs:
                         writer.write({
                             "primary_key": src_key,

@@ -2,6 +2,8 @@
 
 from typing import Dict, Iterable, Optional
 
+from utils.logger import debug_log
+
 
 def fetch_rows(
     conn,
@@ -15,6 +17,7 @@ def fetch_rows(
     batch_size: int = 1000,
     dialect: str = "sqlserver",  # default to sqlserver
     week_column: Optional[str] = None,
+    config: Optional[dict] = None,
 ) -> Iterable[Dict]:
     """Yield rows filtered by partition in primary key order."""
     # Cast partition identifiers to strings so that filtering works for
@@ -56,7 +59,7 @@ def fetch_rows(
     else:
         raise ValueError(f"Unsupported SQL dialect: {dialect}")
 
-    print(f"Executing query: {query.strip()} | Params: {params}")
+    debug_log(f"Executing query: {query.strip()} | Params: {params}", config)
     read_cursor = conn.cursor()
     read_cursor.execute(query, params)
     read_cursor.arraysize = batch_size
