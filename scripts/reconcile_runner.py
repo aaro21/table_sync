@@ -6,7 +6,7 @@ from connectors.sqlserver_connector import get_sqlserver_connection
 from logic.partitioner import get_partitions
 from runners.reconcile import fetch_rows
 from logic.comparator import compare_rows
-from logic.reporter import write_discrepancies_to_csv
+from logic.reporter import write_discrepancies_to_table
 
 
 def main():
@@ -21,7 +21,8 @@ def main():
     src_cols = config["source"]["columns"]
     dest_cols = config["destination"]["columns"]
     primary_key = config["primary_key"]
-    output_path = config["output"]["path"]
+    output_schema = config["output"].get("schema", "")
+    output_table = config["output"]["table"]
 
     all_discrepancies = []
 
@@ -71,7 +72,7 @@ def main():
                     "month": partition["month"]
                 })
 
-    write_discrepancies_to_csv(all_discrepancies, output_path)
+    write_discrepancies_to_table(all_discrepancies, dest_conn, output_schema, output_table)
 
 
 if __name__ == "__main__":
