@@ -2,8 +2,8 @@
 
 This project provides a very small prototype for reconciling table data
 between an Oracle database and a Microsoft SQL Server database. A YAML
-configuration file defines the source and destination tables, column
-mappings and a simple partitioning scheme. The included Python scripts
+configuration file defines the source and destination schemas and tables,
+column mappings and a simple partitioning scheme. The included Python scripts
 load this configuration, connect to both databases, fetch rows for each
 partition and compare them column by column. Any discrepancies are
 written to a CSV report.

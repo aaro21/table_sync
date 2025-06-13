@@ -14,6 +14,8 @@ def main():
 
     src_env = config["source"]["connection"]
     dest_env = config["destination"]["connection"]
+    src_schema = config["source"].get("schema", "")
+    dest_schema = config["destination"].get("schema", "")
     src_table = config["source"]["table"]
     dest_table = config["destination"]["table"]
     src_cols = config["source"]["columns"]
@@ -27,8 +29,8 @@ def main():
         for partition in get_partitions(config):
             print(f"Checking partition: {partition}")
 
-            src_rows = fetch_rows(src_conn, src_table, src_cols, partition, primary_key)
-            dest_rows = fetch_rows(dest_conn, dest_table, dest_cols, partition, primary_key)
+            src_rows = fetch_rows(src_conn, src_schema, src_table, src_cols, partition, primary_key)
+            dest_rows = fetch_rows(dest_conn, dest_schema, dest_table, dest_cols, partition, primary_key)
 
             common_keys = src_rows.keys() & dest_rows.keys()
             missing_keys = src_rows.keys() - dest_rows.keys()
