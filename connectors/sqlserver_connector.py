@@ -1,10 +1,14 @@
 
 """Helpers for connecting to Microsoft SQL Server."""
 
+from typing import Optional
+
+from utils.logger import debug_log
+
 import pyodbc
 
 
-def get_sqlserver_connection(env: dict):
+def get_sqlserver_connection(env: dict, config: Optional[dict] = None):
     """Create and return a :class:`pyodbc.Connection` using environment data."""
     driver = env["driver"]
     server = env["server"]
@@ -19,5 +23,6 @@ def get_sqlserver_connection(env: dict):
         f"Trusted_Connection={trusted};"
         f"TrustServerCertificate={trust_cert};"
     )
+    debug_log(f"Connecting to SQL Server with: {server}/{database}", config)
 
     return pyodbc.connect(conn_str)

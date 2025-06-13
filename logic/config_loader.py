@@ -4,6 +4,8 @@ import yaml
 import os
 from dotenv import load_dotenv
 
+from utils.logger import debug_log
+
 load_dotenv()
 
 
@@ -15,9 +17,9 @@ def get_env_var(name: str) -> str:
     return value
 
 
-def resolve_env_vars(env_map: dict) -> dict:
+def resolve_env_vars(env_map: dict, debug: bool = False) -> dict:
     """Expand a mapping of variable names to actual environment values."""
-    print("Resolving environment variables for:", env_map)
+    debug_log(f"Resolving environment variables for: {env_map}", {"debug": debug})
     return {k: get_env_var(v) for k, v in env_map.items()}
 
 
@@ -26,12 +28,15 @@ def load_config(path: str = "config/config.yaml") -> dict:
     with open(path, "r") as f:
         raw_config = yaml.safe_load(f)
 
+    debug = raw_config.get("debug", False)
+    raw_config["debug"] = debug
+
     # Resolve and store separately for clarity
     source_env = raw_config["source"].get("env", {})
-    raw_config["source"]["resolved_env"] = resolve_env_vars(source_env)
+    raw_config["source"]["resolved_env"] = resolve_env_vars(source_env, debug)
 
     dest_env = raw_config["destination"].get("env", {})
-    raw_config["destination"]["resolved_env"] = resolve_env_vars(dest_env)
+    raw_config["destination"]["resolved_env"] = resolve_env_vars(dest_env, debug)
 
     # Normalize column definitions
     src_cols = raw_config["source"].get("columns", {})

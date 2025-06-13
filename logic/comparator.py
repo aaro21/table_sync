@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 import hashlib
 
 from dateutil import parser
+
+from utils.logger import debug_log
 
 
 def normalize_value(val: Any) -> str:
@@ -53,6 +55,7 @@ def compare_rows(
     dest_row: dict,
     column_map: dict,
     use_row_hash: bool = False,
+    config: Optional[dict] = None,
 ) -> list[dict]:
     """
     Compares two rows column-by-column using the logical column names.
@@ -66,17 +69,25 @@ def compare_rows(
         }
     """
     mismatches = []
+    pk_field = next(iter(column_map.keys()))
+    debug_log(f"Comparing source row {source_row.get(pk_field)}", config)
     src_hash = dest_hash = None
 
     if use_row_hash:
         src_hash = compute_row_hash(source_row)
         dest_hash = compute_row_hash(dest_row)
+        debug_log(f"Source hash: {src_hash}, Dest hash: {dest_hash}", config)
         if src_hash == dest_hash:
+            debug_log(f"Skipping row {source_row.get(pk_field)} - hashes match", config)
             return mismatches
     for logical_col in column_map.keys():
         src_val = source_row.get(logical_col)
         dest_val = dest_row.get(logical_col)
         if not values_equal(src_val, dest_val):
+            debug_log(
+                f"MISMATCH: col={logical_col}, src={src_val}, dest={dest_val}",
+                config,
+            )
             mismatch = {
                 "column": logical_col,
                 "source_value": src_val,
