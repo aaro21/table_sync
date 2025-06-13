@@ -16,8 +16,9 @@ def fetch_rows(
     year = partition["year"]
     month = partition["month"]
 
-    col_list = [f"{v}" for v in columns.values()]
-    select_clause = ", ".join(col_list)
+    logical_cols = list(columns.keys())
+    physical_cols = [columns[c] for c in logical_cols]
+    select_clause = ", ".join(physical_cols)
 
     full_table = f"{schema}.{table}" if schema else table
 
@@ -37,4 +38,4 @@ def fetch_rows(
         if not rows:
             break
         for row in rows:
-            yield dict(zip(col_list, row))
+            yield dict(zip(logical_cols, row))
