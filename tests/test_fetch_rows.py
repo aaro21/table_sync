@@ -26,3 +26,45 @@ def test_fetch_rows_casts_partition_to_str():
     partition = {"year": 2021, "month": 1}
     list(fetch_rows(conn, "dbo", "t", columns, partition, "id", "yr", "mon"))
     assert conn.cursor_obj.executed == ("2021", "1")
+
+
+def test_fetch_rows_filters_week_sqlserver():
+    conn = DummyConn()
+    columns = {"id": "id", "year": "yr", "month": "mon", "week": "wk"}
+    partition = {"year": 2021, "month": 1, "week": 2}
+    list(
+        fetch_rows(
+            conn,
+            "dbo",
+            "t",
+            columns,
+            partition,
+            "id",
+            "yr",
+            "mon",
+            dialect="sqlserver",
+            week_column="wk",
+        )
+    )
+    assert conn.cursor_obj.executed == ("2021", "1", "2")
+
+
+def test_fetch_rows_filters_week_oracle():
+    conn = DummyConn()
+    columns = {"id": "id", "year": "yr", "month": "mon", "week": "wk"}
+    partition = {"year": 2021, "month": 1, "week": 3}
+    list(
+        fetch_rows(
+            conn,
+            "dbo",
+            "t",
+            columns,
+            partition,
+            "id",
+            "yr",
+            "mon",
+            dialect="oracle",
+            week_column="wk",
+        )
+    )
+    assert conn.cursor_obj.executed == ("2021", "1", "3")
