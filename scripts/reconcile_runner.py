@@ -12,8 +12,8 @@ from logic.reporter import DiscrepancyWriter
 def main():
     config = load_config()
 
-    src_env = config["source"]["connection"]
-    dest_env = config["destination"]["connection"]
+    src_env = config["source"]["resolved_env"]
+    dest_env = config["destination"]["resolved_env"]
     src_schema = config["source"].get("schema", "")
     dest_schema = config["destination"].get("schema", "")
     src_table = config["source"]["table"]

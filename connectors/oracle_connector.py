@@ -1,15 +1,21 @@
-"""Utility for creating Oracle database connections."""
+"""Utility for creating Oracle database connections using oracledb."""
 
-import cx_Oracle
+try:
+    import oracledb
+except ImportError:
+    raise ImportError("Please install 'oracledb' via pip: pip install oracledb")
 
 
 def get_oracle_connection(env: dict):
-    """Return a :class:`cx_Oracle.Connection` using environment settings."""
+    """
+    Return an Oracle connection using resolved environment settings.
+    Requires: user, password, host, port, service
+    """
     user = env["user"]
     password = env["password"]
     host = env["host"]
     port = env["port"]
     service = env["service"]
 
-    dsn = cx_Oracle.makedsn(host, port, service_name=service)
-    return cx_Oracle.connect(user=user, password=password, dsn=dsn)
+    dsn = oracledb.makedsn(host, port, service_name=service)
+    return oracledb.connect(user=user, password=password, dsn=dsn)
