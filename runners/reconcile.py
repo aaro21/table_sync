@@ -10,7 +10,10 @@ def fetch_rows(
     columns: Dict,
     partition: Dict,
     primary_key: str,
+    year_column: str,
+    month_column: str,
     batch_size: int = 1000,
+    dialect: str = "sqlserver",  # default to sqlserver
 ) -> Iterable[Dict]:
     """Yield rows filtered by partition in primary key order."""
     # Cast partition identifiers to strings so that filtering works for
@@ -25,15 +28,26 @@ def fetch_rows(
 
     full_table = f"{schema}.{table}" if schema else table
 
-    query = f"""
-        SELECT {select_clause}
-        FROM {full_table}
-        WHERE {columns['year']} = ? AND {columns['month']} = ?
-        ORDER BY {columns[primary_key]}
-    """
+    if dialect == "oracle":
+        query = f"""
+            SELECT {select_clause}
+            FROM {full_table}
+            WHERE {year_column} = :1 AND {month_column} = :2
+            ORDER BY {columns[primary_key]}
+        """
+        params = (year, month)
+    else:  # assume sqlserver
+        query = f"""
+            SELECT {select_clause}
+            FROM {full_table}
+            WHERE {year_column} = ? AND {month_column} = ?
+            ORDER BY {columns[primary_key]}
+        """
+        params = (year, month)
 
+    print(f"Executing query: {query.strip()} | Params: {params}")
     cursor = conn.cursor()
-    cursor.execute(query, (year, month))
+    cursor.execute(query, params)
     cursor.arraysize = batch_size
 
     while True:

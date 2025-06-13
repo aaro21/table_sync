@@ -24,14 +24,23 @@ def main():
     output_schema = config["output"].get("schema", "")
     output_table = config["output"]["table"]
 
+    year_column = config["partitioning"]["year_column"]
+    month_column = config["partitioning"]["month_column"]
+
     with get_oracle_connection(src_env) as src_conn, get_sqlserver_connection(dest_env) as dest_conn:
         writer = DiscrepancyWriter(dest_conn, output_schema, output_table)
 
         for partition in get_partitions(config):
             print(f"Checking partition: {partition}")
 
-            src_iter = fetch_rows(src_conn, src_schema, src_table, src_cols, partition, primary_key)
-            dest_iter = fetch_rows(dest_conn, dest_schema, dest_table, dest_cols, partition, primary_key)
+            src_iter = fetch_rows(
+                src_conn, src_schema, src_table, src_cols, partition,
+                primary_key, year_column, month_column
+            )
+            dest_iter = fetch_rows(
+                dest_conn, dest_schema, dest_table, dest_cols, partition,
+                primary_key, year_column, month_column
+            )
             src_row = next(src_iter, None)
             dest_row = next(dest_iter, None)
 

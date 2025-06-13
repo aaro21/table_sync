@@ -33,8 +33,7 @@ partitioning:
   year_column: year
   month_column: month
   scope:
-    - { year: 2021, month: 1 }
-    - { year: 2021, month: 2 }
+    - { year: '2021', month: '01' }
 
 output:
   format: table
