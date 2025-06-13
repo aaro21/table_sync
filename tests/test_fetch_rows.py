@@ -24,5 +24,5 @@ def test_fetch_rows_casts_partition_to_str():
     conn = DummyConn()
     columns = {"id": "id", "year": "yr", "month": "mon"}
     partition = {"year": 2021, "month": 1}
-    list(fetch_rows(conn, "dbo", "t", columns, partition, "id"))
+    list(fetch_rows(conn, "dbo", "t", columns, partition, "id", "yr", "mon"))
     assert conn.cursor_obj.executed == ("2021", "1")
