@@ -33,14 +33,18 @@ def main():
         for partition in get_partitions(config):
             print(f"Checking partition: {partition}")
 
-            src_iter = fetch_rows(
+            src_rows = list(fetch_rows(
                 src_conn, src_schema, src_table, src_cols, partition,
                 primary_key, year_column, month_column
-            )
-            dest_iter = fetch_rows(
+            ))
+            dest_rows = list(fetch_rows(
                 dest_conn, dest_schema, dest_table, dest_cols, partition,
                 primary_key, year_column, month_column
-            )
+            ))
+
+            src_iter = iter(src_rows)
+            dest_iter = iter(dest_rows)
+
             src_row = next(src_iter, None)
             dest_row = next(dest_iter, None)
 

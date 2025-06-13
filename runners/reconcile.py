@@ -28,6 +28,7 @@ def fetch_rows(
 
     full_table = f"{schema}.{table}" if schema else table
 
+    dialect = dialect.lower()
     if dialect == "oracle":
         query = f"""
             SELECT {select_clause}
@@ -36,7 +37,7 @@ def fetch_rows(
             ORDER BY {columns[primary_key]}
         """
         params = (year, month)
-    else:  # assume sqlserver
+    elif dialect == "sqlserver":
         query = f"""
             SELECT {select_clause}
             FROM {full_table}
@@ -44,14 +45,16 @@ def fetch_rows(
             ORDER BY {columns[primary_key]}
         """
         params = (year, month)
+    else:
+        raise ValueError(f"Unsupported SQL dialect: {dialect}")
 
     print(f"Executing query: {query.strip()} | Params: {params}")
-    cursor = conn.cursor()
-    cursor.execute(query, params)
-    cursor.arraysize = batch_size
+    read_cursor = conn.cursor()
+    read_cursor.execute(query, params)
+    read_cursor.arraysize = batch_size
 
     while True:
-        rows = cursor.fetchmany(batch_size)
+        rows = read_cursor.fetchmany(batch_size)
         if not rows:
             break
         for row in rows:
