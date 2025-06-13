@@ -27,6 +27,9 @@ def main():
     year_column = config["partitioning"]["year_column"]
     month_column = config["partitioning"]["month_column"]
 
+    src_dialect = config["source"].get("type", "sqlserver").lower()
+    dest_dialect = config["destination"].get("type", "sqlserver").lower()
+
     with get_oracle_connection(src_env) as src_conn, get_sqlserver_connection(dest_env) as dest_conn:
         writer = DiscrepancyWriter(dest_conn, output_schema, output_table)
 
@@ -35,11 +38,11 @@ def main():
 
             src_rows = list(fetch_rows(
                 src_conn, src_schema, src_table, src_cols, partition,
-                primary_key, year_column, month_column
+                primary_key, year_column, month_column, dialect=src_dialect
             ))
             dest_rows = list(fetch_rows(
                 dest_conn, dest_schema, dest_table, dest_cols, partition,
-                primary_key, year_column, month_column
+                primary_key, year_column, month_column, dialect=dest_dialect
             ))
 
             src_iter = iter(src_rows)
