@@ -6,7 +6,7 @@ from connectors.sqlserver_connector import get_sqlserver_connection
 from logic.partitioner import get_partitions
 from runners.reconcile import fetch_rows
 from logic.comparator import compare_rows
-from logic.reporter import write_discrepancies_to_table
+from logic.reporter import DiscrepancyWriter
 
 
 def main():
@@ -24,57 +24,60 @@ def main():
     output_schema = config["output"].get("schema", "")
     output_table = config["output"]["table"]
 
-    all_discrepancies = []
-
     with get_oracle_connection(src_env) as src_conn, get_sqlserver_connection(dest_env) as dest_conn:
+        writer = DiscrepancyWriter(dest_conn, output_schema, output_table)
+
         for partition in get_partitions(config):
             print(f"Checking partition: {partition}")
 
-            src_rows = fetch_rows(src_conn, src_schema, src_table, src_cols, partition, primary_key)
-            dest_rows = fetch_rows(dest_conn, dest_schema, dest_table, dest_cols, partition, primary_key)
+            src_iter = fetch_rows(src_conn, src_schema, src_table, src_cols, partition, primary_key)
+            dest_iter = fetch_rows(dest_conn, dest_schema, dest_table, dest_cols, partition, primary_key)
+            src_row = next(src_iter, None)
+            dest_row = next(dest_iter, None)
 
-            common_keys = src_rows.keys() & dest_rows.keys()
-            missing_keys = src_rows.keys() - dest_rows.keys()
-            extra_keys = dest_rows.keys() - src_rows.keys()
+            while src_row is not None or dest_row is not None:
+                src_key = src_row[src_cols[primary_key]] if src_row else None
+                dest_key = dest_row[dest_cols[primary_key]] if dest_row else None
 
-            for key in common_keys:
-                diffs = compare_rows(src_rows[key], dest_rows[key], src_cols)
-                for diff in diffs:
-                    all_discrepancies.append({
-                        "primary_key": key,
-                        "type": "mismatch",
-                        "column": diff["column"],
-                        "source_value": diff["source_value"],
-                        "dest_value": diff["dest_value"],
+                if src_row and dest_row and src_key == dest_key:
+                    diffs = compare_rows(src_row, dest_row, src_cols)
+                    for diff in diffs:
+                        writer.write({
+                            "primary_key": src_key,
+                            "type": "mismatch",
+                            "column": diff["column"],
+                            "source_value": diff["source_value"],
+                            "dest_value": diff["dest_value"],
+                            "year": partition["year"],
+                            "month": partition["month"],
+                        })
+                    src_row = next(src_iter, None)
+                    dest_row = next(dest_iter, None)
+                elif dest_row is None or (src_row and src_key < dest_key):
+                    writer.write({
+                        "primary_key": src_key,
+                        "type": "missing_in_dest",
+                        "column": None,
+                        "source_value": src_row,
+                        "dest_value": None,
                         "year": partition["year"],
-                        "month": partition["month"]
+                        "month": partition["month"],
                     })
+                    src_row = next(src_iter, None)
+                else:
+                    writer.write({
+                        "primary_key": dest_key,
+                        "type": "extra_in_dest",
+                        "column": None,
+                        "source_value": None,
+                        "dest_value": dest_row,
+                        "year": partition["year"],
+                        "month": partition["month"],
+                    })
+                    dest_row = next(dest_iter, None)
 
-            for key in missing_keys:
-                all_discrepancies.append({
-                    "primary_key": key,
-                    "type": "missing_in_dest",
-                    "column": None,
-                    "source_value": src_rows[key],
-                    "dest_value": None,
-                    "year": partition["year"],
-                    "month": partition["month"]
-                })
-
-            for key in extra_keys:
-                all_discrepancies.append({
-                    "primary_key": key,
-                    "type": "extra_in_dest",
-                    "column": None,
-                    "source_value": None,
-                    "dest_value": dest_rows[key],
-                    "year": partition["year"],
-                    "month": partition["month"]
-                })
-
-    write_discrepancies_to_table(all_discrepancies, dest_conn, output_schema, output_table)
+        writer.close()
 
 
 if __name__ == "__main__":
     main()
-

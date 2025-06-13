@@ -1,19 +1,18 @@
-
-
 """Query helpers used by the reconciliation runner."""
+
+from typing import Dict, Iterable
 
 
 def fetch_rows(
     conn,
     schema: str,
     table: str,
-    columns: dict,
-    partition: dict,
+    columns: Dict,
+    partition: Dict,
     primary_key: str,
-) -> dict:
-    """
-    Fetches rows from a table filtered by year and month, returning a dict keyed by primary key.
-    """
+    batch_size: int = 1000,
+) -> Iterable[Dict]:
+    """Yield rows filtered by partition in primary key order."""
     year = partition["year"]
     month = partition["month"]
 
@@ -26,16 +25,16 @@ def fetch_rows(
         SELECT {select_clause}
         FROM {full_table}
         WHERE {columns['year']} = ? AND {columns['month']} = ?
+        ORDER BY {columns[primary_key]}
     """
 
     cursor = conn.cursor()
     cursor.execute(query, (year, month))
-    rows = cursor.fetchall()
+    cursor.arraysize = batch_size
 
-    result = {}
-    for row in rows:
-        row_dict = dict(zip(col_list, row))
-        row_key = row_dict[columns[primary_key]]
-        result[row_key] = row_dict
-
-    return result
+    while True:
+        rows = cursor.fetchmany(batch_size)
+        if not rows:
+            break
+        for row in rows:
+            yield dict(zip(col_list, row))
