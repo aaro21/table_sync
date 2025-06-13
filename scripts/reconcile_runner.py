@@ -30,6 +30,7 @@ def main():
 
     src_dialect = config["source"].get("type", "sqlserver").lower()
     dest_dialect = config["destination"].get("type", "sqlserver").lower()
+    use_row_hash = config.get("comparison", {}).get("use_row_hash", False)
 
     with get_oracle_connection(src_env) as src_conn, get_sqlserver_connection(dest_env) as dest_conn:
         writer = DiscrepancyWriter(dest_conn, output_schema, output_table)
@@ -59,7 +60,7 @@ def main():
                 dest_key = dest_row[primary_key] if dest_row else None
 
                 if src_row and dest_row and src_key == dest_key:
-                    diffs = compare_rows(src_row, dest_row, src_cols)
+                    diffs = compare_rows(src_row, dest_row, src_cols, use_row_hash=use_row_hash)
                     for diff in diffs:
                         writer.write({
                             "primary_key": src_key,
@@ -67,6 +68,10 @@ def main():
                             "column": diff["column"],
                             "source_value": diff["source_value"],
                             "dest_value": diff["dest_value"],
+                            **({
+                                "source_hash": diff.get("source_hash"),
+                                "dest_hash": diff.get("dest_hash")
+                            } if use_row_hash else {}),
                             "year": partition["year"],
                             "month": partition["month"],
                         })

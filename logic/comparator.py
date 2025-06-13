@@ -3,8 +3,25 @@
 from __future__ import annotations
 
 from typing import Any
+import hashlib
 
 from dateutil import parser
+
+
+def normalize_value(val: Any) -> str:
+    """Normalize a single value for hashing consistency."""
+    if val is None:
+        return "NULL"
+    if isinstance(val, float):
+        return f"{val:.5f}"
+    return str(val).strip()
+
+
+def compute_row_hash(row: dict) -> str:
+    """Generate a consistent hash for the provided row."""
+    values = [normalize_value(v) for v in row.values()]
+    joined = "|".join(values)
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()
 
 
 def values_equal(source_val: Any, dest_val: Any) -> bool:
@@ -31,7 +48,12 @@ def values_equal(source_val: Any, dest_val: Any) -> bool:
     return str(source_val) == str(dest_val)
 
 
-def compare_rows(source_row: dict, dest_row: dict, column_map: dict) -> list[dict]:
+def compare_rows(
+    source_row: dict,
+    dest_row: dict,
+    column_map: dict,
+    use_row_hash: bool = False,
+) -> list[dict]:
     """
     Compares two rows column-by-column using the logical column names.
 
@@ -44,13 +66,25 @@ def compare_rows(source_row: dict, dest_row: dict, column_map: dict) -> list[dic
         }
     """
     mismatches = []
+    src_hash = dest_hash = None
+
+    if use_row_hash:
+        src_hash = compute_row_hash(source_row)
+        dest_hash = compute_row_hash(dest_row)
+        if src_hash == dest_hash:
+            return mismatches
     for logical_col in column_map.keys():
         src_val = source_row.get(logical_col)
         dest_val = dest_row.get(logical_col)
         if not values_equal(src_val, dest_val):
-            mismatches.append({
+            mismatch = {
                 "column": logical_col,
                 "source_value": src_val,
                 "dest_value": dest_val,
-            })
+            }
+            if use_row_hash:
+                mismatch["source_hash"] = src_hash
+                mismatch["dest_hash"] = dest_hash
+            mismatches.append(mismatch)
+
     return mismatches
