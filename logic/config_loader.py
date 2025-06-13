@@ -52,4 +52,10 @@ def load_config(path: str = "config/config.yaml") -> dict:
             k: v for k, v in dest_cols.items() if k in src_cols
         }
 
+    def _lower_map(col_map: dict) -> dict:
+        return {k.lower(): v.lower() for k, v in col_map.items()}
+
+    raw_config["source"]["columns"] = _lower_map(raw_config["source"]["columns"])
+    raw_config["destination"]["columns"] = _lower_map(raw_config["destination"]["columns"])
+
     return raw_config

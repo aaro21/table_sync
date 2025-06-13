@@ -14,13 +14,13 @@ def compare_rows(source_row: dict, dest_row: dict, column_map: dict) -> list[dic
         }
     """
     mismatches = []
-    for logical_col, _ in column_map.items():
-        src_val = source_row.get(column_map[logical_col])
-        dest_val = dest_row.get(column_map[logical_col])
+    for logical_col in column_map.keys():
+        src_val = source_row.get(logical_col)
+        dest_val = dest_row.get(logical_col)
         if src_val != dest_val:
             mismatches.append({
                 "column": logical_col,
                 "source_value": src_val,
-                "dest_value": dest_val
+                "dest_value": dest_val,
             })
     return mismatches

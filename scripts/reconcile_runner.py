@@ -36,8 +36,8 @@ def main():
             dest_row = next(dest_iter, None)
 
             while src_row is not None or dest_row is not None:
-                src_key = src_row[src_cols[primary_key]] if src_row else None
-                dest_key = dest_row[dest_cols[primary_key]] if dest_row else None
+                src_key = src_row[primary_key] if src_row else None
+                dest_key = dest_row[primary_key] if dest_row else None
 
                 if src_row and dest_row and src_key == dest_key:
                     diffs = compare_rows(src_row, dest_row, src_cols)
