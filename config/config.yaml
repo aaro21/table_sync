@@ -29,6 +29,9 @@ destination:
 
 primary_key: id
 
+comparison:
+  use_row_hash: true
+
 partitioning:
   year_column: year
   month_column: month
