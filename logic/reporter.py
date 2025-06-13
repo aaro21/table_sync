@@ -2,15 +2,67 @@
 
 import csv
 import os
+from typing import Iterable, List, Dict
 import pyodbc
 
 
-def write_discrepancies_to_csv(discrepancies: list[dict], output_path: str):
-    """
-    Writes a list of discrepancy records to a CSV file.
+class DiscrepancyWriter:
+    """Incrementally write discrepancy records to a SQL Server table."""
 
-    Each record in the list should be a dictionary with consistent keys.
-    """
+    def __init__(self, conn: pyodbc.Connection, schema: str, table: str, batch_size: int = 1000):
+        self.conn = conn
+        self.schema = schema
+        self.table = table
+        self.batch_size = batch_size
+        self.columns: List[str] | None = None
+        self.buffer: List[Dict] = []
+        self.prepared = False
+
+    def _full_table(self) -> str:
+        return f"{self.schema}.{self.table}" if self.schema else self.table
+
+    def _prepare_table(self, record: Dict):
+        if self.prepared:
+            return
+        self.columns = list(record.keys())
+        cursor = self.conn.cursor()
+        full_table = self._full_table()
+        drop_sql = f"IF OBJECT_ID('{full_table}', 'U') IS NOT NULL DROP TABLE {full_table}"
+        cursor.execute(drop_sql)
+        column_defs = ", ".join(f"[{c}] NVARCHAR(MAX)" for c in self.columns)
+        create_sql = f"CREATE TABLE {full_table} ({column_defs})"
+        cursor.execute(create_sql)
+        self.conn.commit()
+        self.prepared = True
+
+    def write(self, record: Dict):
+        self._prepare_table(record)
+        self.buffer.append(record)
+        if len(self.buffer) >= self.batch_size:
+            self.flush()
+
+    def flush(self):
+        if not self.buffer:
+            return
+        cursor = self.conn.cursor()
+        full_table = self._full_table()
+        placeholders = ", ".join("?" for _ in self.columns)
+        insert_sql = (
+            f"INSERT INTO {full_table} ({', '.join('[' + c + ']' for c in self.columns)}) "
+            f"VALUES ({placeholders})"
+        )
+        values = [[rec.get(c) for c in self.columns] for rec in self.buffer]
+        cursor.executemany(insert_sql, values)
+        self.conn.commit()
+        self.buffer.clear()
+
+    def close(self):
+        self.flush()
+
+
+def write_discrepancies_to_csv(discrepancies: Iterable[Dict], output_path: str):
+    """Write discrepancy records to a CSV file."""
+    discrepancies = list(discrepancies)
     if not discrepancies:
         print("No discrepancies found.")
         return
@@ -23,43 +75,3 @@ def write_discrepancies_to_csv(discrepancies: list[dict], output_path: str):
         writer.writerows(discrepancies)
 
     print(f"Discrepancy report written to: {output_path}")
-
-
-def write_discrepancies_to_table(
-    discrepancies: list[dict],
-    conn: pyodbc.Connection,
-    schema: str,
-    table: str,
-):
-    """Write discrepancy records to a table in SQL Server."""
-
-    if not discrepancies:
-        print("No discrepancies found.")
-        return
-
-    cursor = conn.cursor()
-
-    full_table = f"{schema}.{table}" if schema else table
-
-    # Drop table if it already exists
-    drop_sql = f"IF OBJECT_ID('{full_table}', 'U') IS NOT NULL DROP TABLE {full_table}" 
-    cursor.execute(drop_sql)
-
-    columns = list(discrepancies[0].keys())
-    column_defs = ", ".join(f"[{c}] NVARCHAR(MAX)" for c in columns)
-    create_sql = f"CREATE TABLE {full_table} ({column_defs})"
-    cursor.execute(create_sql)
-
-    placeholders = ", ".join("?" for _ in columns)
-    insert_sql = (
-        f"INSERT INTO {full_table} ({', '.join('[' + c + ']' for c in columns)}) "
-        f"VALUES ({placeholders})"
-    )
-
-    for record in discrepancies:
-        values = [record.get(c) for c in columns]
-        cursor.execute(insert_sql, values)
-
-    conn.commit()
-
-    print(f"Discrepancy report written to table: {full_table}")

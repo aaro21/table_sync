@@ -1,8 +1,11 @@
-"""Example script showing how to iterate over configured partitions."""
+"""Utilities for iterating over configured table partitions."""
 
-from logic.partitioner import get_partitions
+from typing import Dict, Iterable
 
-for part in get_partitions(config):
-    year = part["year"]
-    month = part["month"]
-    print(f"Processing: year={year}, month={month}")
+
+def get_partitions(config: Dict) -> Iterable[Dict]:
+    """Yield partition dictionaries from the loaded configuration."""
+    part_cfg = config.get("partitioning", {})
+    scope = part_cfg.get("scope", [])
+    for part in scope:
+        yield part
