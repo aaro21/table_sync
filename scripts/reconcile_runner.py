@@ -26,6 +26,7 @@ def main():
 
     year_column = config["partitioning"]["year_column"]
     month_column = config["partitioning"]["month_column"]
+    week_column = config["partitioning"].get("week_column")
 
     src_dialect = config["source"].get("type", "sqlserver").lower()
     dest_dialect = config["destination"].get("type", "sqlserver").lower()
@@ -38,11 +39,13 @@ def main():
 
             src_rows = list(fetch_rows(
                 src_conn, src_schema, src_table, src_cols, partition,
-                primary_key, year_column, month_column, dialect=src_dialect
+                primary_key, year_column, month_column, dialect=src_dialect,
+                week_column=week_column
             ))
             dest_rows = list(fetch_rows(
                 dest_conn, dest_schema, dest_table, dest_cols, partition,
-                primary_key, year_column, month_column, dialect=dest_dialect
+                primary_key, year_column, month_column, dialect=dest_dialect,
+                week_column=week_column
             ))
 
             src_iter = iter(src_rows)
