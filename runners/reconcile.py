@@ -13,8 +13,11 @@ def fetch_rows(
     batch_size: int = 1000,
 ) -> Iterable[Dict]:
     """Yield rows filtered by partition in primary key order."""
-    year = partition["year"]
-    month = partition["month"]
+    # Cast partition identifiers to strings so that filtering works for
+    # both numeric and varchar column types. This avoids implicit type
+    # conversion issues when year/month columns are stored as VARCHAR.
+    year = str(partition["year"])
+    month = str(partition["month"])
 
     logical_cols = list(columns.keys())
     physical_cols = [columns[c] for c in logical_cols]
