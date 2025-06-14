@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 import hashlib
 from concurrent.futures import ProcessPoolExecutor
 
 from dateutil import parser
+from tqdm import tqdm
 
 from utils.logger import debug_log
 
@@ -130,3 +131,25 @@ def compare_rows(
             mismatches.append(mismatch)
 
     return mismatches
+
+
+def compare_row_pairs(
+    row_pairs: Iterable[tuple],
+    *,
+    parallel: bool = False,
+    workers: int = 4,
+) -> list[Optional[list[dict]]]:
+    """Compare a sequence of row pairs with a progress bar."""
+    if parallel:
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            return list(
+                tqdm(
+                    pool.map(compare_row_pair, row_pairs),
+                    total=len(row_pairs),
+                    desc="Comparing rows",
+                )
+            )
+    else:
+        return [
+            compare_row_pair(p) for p in tqdm(row_pairs, desc="Comparing rows")
+        ]

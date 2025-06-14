@@ -1,14 +1,13 @@
 """Command line entry point for running table reconciliation."""
 
 import argparse
-from concurrent.futures import ProcessPoolExecutor
 
 from logic.config_loader import load_config
 from connectors.oracle_connector import get_oracle_connection
 from connectors.sqlserver_connector import get_sqlserver_connection
 from logic.partitioner import get_partitions
 from runners.reconcile import fetch_rows
-from logic.comparator import compare_rows, compare_row_pair
+from logic.comparator import compare_rows, compare_row_pair, compare_row_pairs
 from logic.reporter import DiscrepancyWriter
 from utils.logger import debug_log
 
@@ -136,11 +135,10 @@ def main():
                     dest_row = next(dest_iter, None)
 
             if row_pairs:
-                if use_parallel:
-                    with ProcessPoolExecutor(max_workers=4) as pool:
-                        results = list(pool.map(compare_row_pair, row_pairs))
-                else:
-                    results = [compare_row_pair(p) for p in row_pairs]
+                results = compare_row_pairs(
+                    row_pairs,
+                    parallel=use_parallel,
+                )
 
                 for pair, diffs in zip(row_pairs, results):
                     src_key = pair[0][primary_key]
