@@ -1,13 +1,14 @@
 """Command line entry point for running table reconciliation."""
 
 import argparse
+from concurrent.futures import ProcessPoolExecutor
 
 from logic.config_loader import load_config
 from connectors.oracle_connector import get_oracle_connection
 from connectors.sqlserver_connector import get_sqlserver_connection
 from logic.partitioner import get_partitions
 from runners.reconcile import fetch_rows
-from logic.comparator import compare_rows
+from logic.comparator import compare_rows, compare_row_pair
 from logic.reporter import DiscrepancyWriter
 from utils.logger import debug_log
 
@@ -46,6 +47,7 @@ def main():
     src_dialect = config["source"].get("type", "sqlserver").lower()
     dest_dialect = config["destination"].get("type", "sqlserver").lower()
     use_row_hash = config.get("comparison", {}).get("use_row_hash", False)
+    use_parallel = config.get("comparison", {}).get("parallel", False)
 
     with get_oracle_connection(src_env, config) as src_conn, get_sqlserver_connection(dest_env, config) as dest_conn:
         writer = DiscrepancyWriter(dest_conn, output_schema, output_table)
@@ -100,32 +102,14 @@ def main():
             src_row = next(src_iter, None)
             dest_row = next(dest_iter, None)
 
+            row_pairs = []
+
             while src_row is not None or dest_row is not None:
                 src_key = src_row[primary_key] if src_row else None
                 dest_key = dest_row[primary_key] if dest_row else None
 
                 if src_row and dest_row and src_key == dest_key:
-                    diffs = compare_rows(
-                        src_row,
-                        dest_row,
-                        src_cols,
-                        use_row_hash=use_row_hash,
-                        config=config,
-                    )
-                    for diff in diffs:
-                        writer.write({
-                            "primary_key": src_key,
-                            "type": "mismatch",
-                            "column": diff["column"],
-                            "source_value": diff["source_value"],
-                            "dest_value": diff["dest_value"],
-                            **({
-                                "source_hash": diff.get("source_hash"),
-                                "dest_hash": diff.get("dest_hash")
-                            } if use_row_hash else {}),
-                            "year": partition["year"],
-                            "month": partition["month"],
-                        })
+                    row_pairs.append((src_row, dest_row, src_cols, config))
                     src_row = next(src_iter, None)
                     dest_row = next(dest_iter, None)
                 elif dest_row is None or (src_row and src_key < dest_key):
@@ -150,6 +134,32 @@ def main():
                         "month": partition["month"],
                     })
                     dest_row = next(dest_iter, None)
+
+            if row_pairs:
+                if use_parallel:
+                    with ProcessPoolExecutor(max_workers=4) as pool:
+                        results = list(pool.map(compare_row_pair, row_pairs))
+                else:
+                    results = [compare_row_pair(p) for p in row_pairs]
+
+                for pair, diffs in zip(row_pairs, results):
+                    src_key = pair[0][primary_key]
+                    if not diffs:
+                        continue
+                    for diff in diffs:
+                        writer.write({
+                            "primary_key": src_key,
+                            "type": "mismatch",
+                            "column": diff["column"],
+                            "source_value": diff["source_value"],
+                            "dest_value": diff["dest_value"],
+                            **({
+                                "source_hash": diff.get("source_hash"),
+                                "dest_hash": diff.get("dest_hash"),
+                            } if use_row_hash else {}),
+                            "year": partition["year"],
+                            "month": partition["month"],
+                        })
 
         writer.close()
 

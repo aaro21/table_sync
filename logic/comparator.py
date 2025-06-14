@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 import hashlib
+from concurrent.futures import ProcessPoolExecutor
 
 from dateutil import parser
 
@@ -48,6 +49,23 @@ def values_equal(source_val: Any, dest_val: Any) -> bool:
 
     # Fallback to string equality
     return str(source_val) == str(dest_val)
+
+
+def compare_row_pair(args: tuple) -> Optional[list[dict]]:
+    """Compare a single pair of rows for multiprocessing."""
+    source_row, dest_row, column_map, config = args
+
+    if config.get("comparison", {}).get("use_row_hash", False):
+        if compute_row_hash(source_row) == compute_row_hash(dest_row):
+            return None
+
+    return compare_rows(
+        source_row,
+        dest_row,
+        column_map,
+        use_row_hash=config.get("comparison", {}).get("use_row_hash", False),
+        config=config,
+    )
 
 
 def compare_rows(
