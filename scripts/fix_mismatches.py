@@ -6,6 +6,8 @@ import argparse
 from collections import defaultdict
 from typing import Dict, Optional
 
+from tqdm import tqdm
+
 from logic.config_loader import load_config
 from connectors.sqlserver_connector import get_sqlserver_connection
 from utils.logger import debug_log
@@ -63,11 +65,12 @@ def fix_mismatches(
         debug_log(f"Fetching mismatches with: {sql} | {tuple(params)}", config, level="medium")
         cur.execute(sql, tuple(params))
 
+        rows = cur.fetchall()
         summary: Dict[str, Dict] = defaultdict(
             lambda: {"total": 0, "updates": 0, "nulls": 0, "columns": defaultdict(int)}
         )
 
-        for pk, col, src_val, yr, mon in cur.fetchall():
+        for pk, col, src_val, yr, mon in tqdm(rows, desc="Applying fixes"):
             part_key = f"{yr}-{str(mon).zfill(2)}"
             info = summary[part_key]
             info["total"] += 1
