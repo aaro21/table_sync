@@ -111,7 +111,10 @@ def compare_rows(
                 level="high",
             )
             return mismatches
-    for logical_col in column_map.keys():
+    column_iter = column_map.keys()
+    if use_row_hash and src_hash != dest_hash:
+        column_iter = tqdm(column_iter, desc="Comparing columns")
+    for logical_col in column_iter:
         src_val = source_row.get(logical_col)
         dest_val = dest_row.get(logical_col)
         if not values_equal(src_val, dest_val):
