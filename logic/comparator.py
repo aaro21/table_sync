@@ -70,15 +70,27 @@ def compare_rows(
     """
     mismatches = []
     pk_field = next(iter(column_map.keys()))
-    debug_log(f"Comparing source row {source_row.get(pk_field)}", config)
+    debug_log(
+        f"Comparing source row {source_row.get(pk_field)}",
+        config,
+        level="high",
+    )
     src_hash = dest_hash = None
 
     if use_row_hash:
         src_hash = compute_row_hash(source_row)
         dest_hash = compute_row_hash(dest_row)
-        debug_log(f"Source hash: {src_hash}, Dest hash: {dest_hash}", config)
+        debug_log(
+            f"Source hash: {src_hash}, Dest hash: {dest_hash}",
+            config,
+            level="high",
+        )
         if src_hash == dest_hash:
-            debug_log(f"Skipping row {source_row.get(pk_field)} - hashes match", config)
+            debug_log(
+                f"Skipping row {source_row.get(pk_field)} - hashes match",
+                config,
+                level="high",
+            )
             return mismatches
     for logical_col in column_map.keys():
         src_val = source_row.get(logical_col)
@@ -87,6 +99,7 @@ def compare_rows(
             debug_log(
                 f"MISMATCH: col={logical_col}, src={src_val}, dest={dest_val}",
                 config,
+                level="high",
             )
             mismatch = {
                 "column": logical_col,

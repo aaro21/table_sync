@@ -14,12 +14,18 @@ from utils.logger import debug_log
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--debug", action="store_true", help="enable debug logs")
+    parser.add_argument(
+        "--debug",
+        nargs="?",
+        const="high",
+        choices=["low", "medium", "high"],
+        help="set debug level",
+    )
     args = parser.parse_args()
 
     config = load_config()
     if args.debug:
-        config["debug"] = True
+        config["debug"] = args.debug
 
     src_env = config["source"]["resolved_env"]
     dest_env = config["destination"]["resolved_env"]
@@ -45,7 +51,11 @@ def main():
         writer = DiscrepancyWriter(dest_conn, output_schema, output_table)
 
         for partition in get_partitions(config):
-            debug_log(f"Partition: {partition}", config)
+            debug_log(
+                f"Partition: {partition}",
+                config,
+                level="low",
+            )
 
             src_rows = list(
                 fetch_rows(
@@ -81,6 +91,7 @@ def main():
             debug_log(
                 f"Fetched {len(src_rows)} source rows and {len(dest_rows)} destination rows",
                 config,
+                level="medium",
             )
 
             src_iter = iter(src_rows)
