@@ -59,7 +59,11 @@ def fetch_rows(
     else:
         raise ValueError(f"Unsupported SQL dialect: {dialect}")
 
-    debug_log(f"Executing query: {query.strip()} | Params: {params}", config)
+    debug_log(
+        f"Executing query: {query.strip()} | Params: {params}",
+        config,
+        level="medium",
+    )
     read_cursor = conn.cursor()
     read_cursor.execute(query, params)
     read_cursor.arraysize = batch_size

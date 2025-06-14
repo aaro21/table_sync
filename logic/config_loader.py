@@ -17,9 +17,13 @@ def get_env_var(name: str) -> str:
     return value
 
 
-def resolve_env_vars(env_map: dict, debug: bool = False) -> dict:
+def resolve_env_vars(env_map: dict, debug: str | bool = "low") -> dict:
     """Expand a mapping of variable names to actual environment values."""
-    debug_log(f"Resolving environment variables for: {env_map}", {"debug": debug})
+    debug_log(
+        f"Resolving environment variables for: {env_map}",
+        {"debug": debug},
+        level="high",
+    )
     return {k: get_env_var(v) for k, v in env_map.items()}
 
 
@@ -28,7 +32,13 @@ def load_config(path: str = "config/config.yaml") -> dict:
     with open(path, "r") as f:
         raw_config = yaml.safe_load(f)
 
-    debug = raw_config.get("debug", False)
+    raw_debug = raw_config.get("debug", "low")
+    if isinstance(raw_debug, bool):
+        debug = "high" if raw_debug else "low"
+    else:
+        debug = str(raw_debug).lower()
+        if debug not in {"low", "medium", "high"}:
+            debug = "low"
     raw_config["debug"] = debug
 
     # Resolve and store separately for clarity

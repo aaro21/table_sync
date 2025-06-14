@@ -23,6 +23,10 @@ def get_sqlserver_connection(env: dict, config: Optional[dict] = None):
         f"Trusted_Connection={trusted};"
         f"TrustServerCertificate={trust_cert};"
     )
-    debug_log(f"Connecting to SQL Server with: {server}/{database}", config)
+    debug_log(
+        f"Connecting to SQL Server with: {server}/{database}",
+        config,
+        level="low",
+    )
 
     return pyodbc.connect(conn_str)

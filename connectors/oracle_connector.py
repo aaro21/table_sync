@@ -22,5 +22,5 @@ def get_oracle_connection(env: dict, config: Optional[dict] = None):
     service = env["service"]
 
     dsn = oracledb.makedsn(host, port, service_name=service)
-    debug_log(f"Connecting to Oracle with DSN: {dsn}", config)
+    debug_log(f"Connecting to Oracle with DSN: {dsn}", config, level="low")
     return oracledb.connect(user=user, password=password, dsn=dsn)
