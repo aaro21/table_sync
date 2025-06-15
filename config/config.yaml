@@ -48,7 +48,6 @@ output:
   schema: recon
   table: discrepancies
 
-# Controls for automatic repair of mismatched rows
-apply_fixes: false
-dry_run: true
-skip_null_updates: true
+updates:
+  dry_run: true
+  skip_nulls: true
