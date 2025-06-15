@@ -213,19 +213,23 @@ def compare_row_pairs(
         ]
 
         diffs = src_df[columns] != dest_df[columns]
-        for col in columns:
-            col_diffs = diffs[col]
-            for df_idx in col_diffs[col_diffs].index:
-                pair_idx = mismatched_indices[df_idx]
-                mismatch = {
-                    "column": col,
-                    "source_value": src_df.at[df_idx, col],
-                    "dest_value": dest_df.at[df_idx, col],
-                }
-                if use_row_hash:
-                    mismatch["source_hash"] = hashes[df_idx][0]
-                    mismatch["dest_hash"] = hashes[df_idx][1]
-                results[pair_idx].append(mismatch)
+        for df_idx in tqdm(
+            range(len(mismatched_pairs)),
+            desc="Checking mismatches",
+            total=len(mismatched_pairs),
+        ):
+            for col in columns:
+                if diffs.at[df_idx, col]:
+                    pair_idx = mismatched_indices[df_idx]
+                    mismatch = {
+                        "column": col,
+                        "source_value": src_df.at[df_idx, col],
+                        "dest_value": dest_df.at[df_idx, col],
+                    }
+                    if use_row_hash:
+                        mismatch["source_hash"] = hashes[df_idx][0]
+                        mismatch["dest_hash"] = hashes[df_idx][1]
+                    results[pair_idx].append(mismatch)
 
     for idx in mismatched_indices:
         if results[idx] == []:
