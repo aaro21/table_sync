@@ -120,6 +120,7 @@ def main():
                         "dest_value": None,
                         "year": partition["year"],
                         "month": partition["month"],
+                        "week": partition.get("week"),
                     })
                     src_row = next(src_iter, None)
                 else:
@@ -131,6 +132,7 @@ def main():
                         "dest_value": dest_row,
                         "year": partition["year"],
                         "month": partition["month"],
+                        "week": partition.get("week"),
                     })
                     dest_row = next(dest_iter, None)
 
@@ -157,6 +159,7 @@ def main():
                             } if use_row_hash else {}),
                             "year": partition["year"],
                             "month": partition["month"],
+                            "week": partition.get("week"),
                         })
 
         writer.close()
