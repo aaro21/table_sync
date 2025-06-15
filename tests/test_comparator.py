@@ -1,5 +1,5 @@
 import sys, os; sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from logic.comparator import compare_rows, compute_row_hash
+from logic.comparator import compare_rows, compute_row_hash, compare_row_pairs
 from decimal import Decimal
 
 
@@ -47,6 +47,32 @@ def test_compare_rows_row_hash_mismatch():
             "column": "col",
             "source_value": "a",
             "dest_value": "b",
+            "source_hash": expected_src_hash,
+            "dest_hash": expected_dest_hash,
+        }
+    ]
+
+
+def test_compare_row_pairs_dataframe():
+    src1 = {"id": 1, "col": "a"}
+    dest1 = {"id": 1, "col": "a"}
+    src2 = {"id": 2, "col": "b"}
+    dest2 = {"id": 2, "col": "c"}
+    columns = {"id": "id", "col": "col"}
+    config = {"primary_key": "id", "comparison": {"use_row_hash": True}}
+    pairs = [
+        (src1, dest1, columns, config),
+        (src2, dest2, columns, config),
+    ]
+    results = compare_row_pairs(pairs)
+    assert results[0] is None
+    expected_src_hash = compute_row_hash(src2)
+    expected_dest_hash = compute_row_hash(dest2)
+    assert results[1] == [
+        {
+            "column": "col",
+            "source_value": "b",
+            "dest_value": "c",
             "source_hash": expected_src_hash,
             "dest_hash": expected_dest_hash,
         }
