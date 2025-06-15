@@ -8,6 +8,7 @@ from concurrent.futures import ProcessPoolExecutor
 
 from dateutil import parser
 from tqdm import tqdm
+import pandas as pd
 
 from utils.logger import debug_log
 
@@ -50,6 +51,26 @@ def values_equal(source_val: Any, dest_val: Any) -> bool:
 
     # Fallback to string equality
     return str(source_val) == str(dest_val)
+
+
+def sanitize(value: Any) -> Any:
+    """Normalize *value* for comparison purposes."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except Exception:
+        pass
+    try:
+        return parser.parse(str(value)).date()
+    except Exception:
+        pass
+    return str(value).strip()
+
+
+def sanitize_row(row: dict, columns: Iterable[str]) -> dict:
+    """Return a new row dict with sanitized values for *columns*."""
+    return {col: sanitize(row.get(col)) for col in columns}
 
 
 def compare_row_pair(args: tuple) -> Optional[list[dict]]:
@@ -152,7 +173,62 @@ def compare_row_pairs(
                     desc="Comparing rows",
                 )
             )
-    else:
-        return [
-            compare_row_pair(p) for p in tqdm(row_pairs, desc="Comparing rows")
+
+    pairs = list(row_pairs)
+    if not pairs:
+        return []
+
+    column_map = pairs[0][2]
+    config = pairs[0][3]
+    columns = list(column_map.keys())
+    primary_key = config.get("primary_key")
+    use_row_hash = config.get("comparison", {}).get("use_row_hash", False)
+
+    results: list[Optional[list[dict]]] = [None] * len(pairs)
+    mismatched_pairs = []
+    mismatched_indices = []
+    hashes: list[tuple[str | None, str | None]] = []
+
+    for idx, (src_row, dest_row, _col_map, cfg) in enumerate(pairs):
+        src_hash = dest_hash = None
+        if use_row_hash:
+            src_hash = compute_row_hash(src_row)
+            dest_hash = compute_row_hash(dest_row)
+            if src_hash == dest_hash:
+                continue
+        mismatched_pairs.append((src_row, dest_row))
+        mismatched_indices.append(idx)
+        hashes.append((src_hash, dest_hash))
+        results[idx] = []
+
+    if mismatched_pairs:
+        src_df = pd.DataFrame(
+            [sanitize_row(src, columns) for src, _ in mismatched_pairs]
+        )
+        dest_df = pd.DataFrame(
+            [sanitize_row(dest, columns) for _, dest in mismatched_pairs]
+        )
+        src_df["primary_key"] = [
+            src[primary_key] for src, _ in mismatched_pairs
         ]
+
+        diffs = src_df[columns] != dest_df[columns]
+        for col in columns:
+            col_diffs = diffs[col]
+            for df_idx in col_diffs[col_diffs].index:
+                pair_idx = mismatched_indices[df_idx]
+                mismatch = {
+                    "column": col,
+                    "source_value": src_df.at[df_idx, col],
+                    "dest_value": dest_df.at[df_idx, col],
+                }
+                if use_row_hash:
+                    mismatch["source_hash"] = hashes[df_idx][0]
+                    mismatch["dest_hash"] = hashes[df_idx][1]
+                results[pair_idx].append(mismatch)
+
+    for idx in mismatched_indices:
+        if results[idx] == []:
+            results[idx] = None
+
+    return results
