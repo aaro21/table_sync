@@ -142,8 +142,9 @@ def main():
                     parallel=use_parallel,
                 )
 
-                for pair, diffs in zip(row_pairs, results):
-                    src_key = pair[0][primary_key]
+                for result in results:
+                    src_key = result["primary_key"]
+                    diffs = result["mismatches"]
                     if not diffs:
                         continue
                     for diff in diffs:
