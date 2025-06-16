@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dateutil import parser
 
 from utils.logger import debug_log
+from tqdm import tqdm
 
 
 def normalize_value(val: Any) -> str:
@@ -213,7 +214,7 @@ def compare_row_pairs(
 
     if parallel:
         tasks: list[tuple] = []
-        for src_row, dest_row, col_map, config in row_pairs:
+        for src_row, dest_row, col_map, config in tqdm(row_pairs, desc="Filtering matched hashes", unit="row"):
             use_row_hash = config.get("comparison", {}).get("use_row_hash", False)
             if use_row_hash:
                 src_hash = compute_row_hash(src_row)
@@ -228,6 +229,7 @@ def compare_row_pairs(
             tasks.append((src_row, dest_row, columns, config))
 
         if not tasks:
+            debug_log("All rows skipped after hash match filtering", config)
             return
 
         with ThreadPoolExecutor(max_workers=workers) as executor:
@@ -237,7 +239,7 @@ def compare_row_pairs(
                 if result:
                     yield result
     else:
-        for src_row, dest_row, col_map, config in row_pairs:
+        for src_row, dest_row, col_map, config in tqdm(row_pairs, desc="Filtering matched hashes", unit="row"):
             use_row_hash = config.get("comparison", {}).get("use_row_hash", False)
             if use_row_hash:
                 src_hash = compute_row_hash(src_row)
