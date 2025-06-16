@@ -1,6 +1,7 @@
 """Command line entry point for running table reconciliation."""
 
 import argparse
+from typing import Any
 
 from logic.config_loader import load_config
 from connectors.oracle_connector import get_oracle_connection
@@ -113,6 +114,11 @@ def main():
             row_pairs = []
 
             while src_row is not None or dest_row is not None:
+                if src_row is not None:
+                    assert primary_key in src_row, f"Primary key '{primary_key}' missing in source row: {src_row}"
+                if dest_row is not None:
+                    assert primary_key in dest_row, f"Primary key '{primary_key}' missing in destination row: {dest_row}"
+
                 src_key = src_row[primary_key] if src_row else None
                 dest_key = dest_row[primary_key] if dest_row else None
 
@@ -146,7 +152,8 @@ def main():
                     dest_row = next(dest_iter, None)
 
             if row_pairs:
-                sample: list[tuple[int, dict]] = []
+                sample: list[tuple[Any, dict]] = []
+                seen_pks = set()
                 with tqdm(desc="mismatched rows", unit="row") as pbar:
                     for result in compare_row_pairs(
                         row_pairs,
@@ -155,8 +162,9 @@ def main():
                         src_key = result["primary_key"]
                         if result["mismatches"]:
                             pbar.update(1)
-                            if len(sample) < 2:
+                            if src_key not in seen_pks and len(sample) < 2:
                                 sample.append((src_key, result["mismatches"][0]))
+                                seen_pks.add(src_key)
                             for diff in result["mismatches"]:
                                 writer.write({
                                     "primary_key": src_key,

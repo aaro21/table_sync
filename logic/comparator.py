@@ -93,7 +93,7 @@ def compare_row_pair(args: tuple) -> Optional[list[dict]]:
     )
 
 
-def compare_row_pair_by_pk(src_row: dict, dest_row: dict, columns: Iterable[str], config: dict) -> dict:
+def compare_row_pair_by_pk(src_row: dict, dest_row: dict, columns: Iterable[str], config: dict) -> Optional[dict]:
     """Compare two rows and return mismatches keyed by primary key."""
     pk_col = config.get("columns", {}).get("primary_key", config.get("primary_key"))
     pk = src_row.get(pk_col)
@@ -105,7 +105,7 @@ def compare_row_pair_by_pk(src_row: dict, dest_row: dict, columns: Iterable[str]
         src_hash = compute_row_hash(src_row)
         dest_hash = compute_row_hash(dest_row)
         if src_hash == dest_hash:
-            return {"primary_key": pk, "mismatches": []}
+            return None
 
     mismatches: list[dict] = []
     for col in columns:
@@ -134,7 +134,8 @@ def compare_row_pair_by_pk(src_row: dict, dest_row: dict, columns: Iterable[str]
             config,
             level="medium",
         )
-    return {"primary_key": pk, "mismatches": mismatches}
+        return {"primary_key": pk, "mismatches": mismatches}
+    return None
 
 
 def compare_rows(
@@ -233,7 +234,7 @@ def compare_row_pairs(
             futures = [executor.submit(compare_row_pair_by_pk, *t) for t in tasks]
             for future in as_completed(futures):
                 result = future.result()
-                if result["mismatches"]:
+                if result:
                     yield result
     else:
         for src_row, dest_row, col_map, config in row_pairs:
@@ -248,5 +249,5 @@ def compare_row_pairs(
             if only_cols:
                 columns = [c for c in columns if c in only_cols]
             result = compare_row_pair_by_pk(src_row, dest_row, columns, config)
-            if result["mismatches"]:
+            if result:
                 yield result
