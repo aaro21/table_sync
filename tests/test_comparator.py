@@ -77,3 +77,21 @@ def test_compare_row_pairs_dataframe():
             "dest_hash": expected_dest_hash,
         }
     ]
+
+
+def test_compare_row_pairs_only_columns():
+    src = {"id": 1, "col": "a", "extra": "x"}
+    dest = {"id": 1, "col": "a", "extra": "y"}
+    columns = {"id": "id", "col": "col", "extra": "extra"}
+    config = {"primary_key": "id", "comparison": {"only_columns": ["col"]}}
+    results = compare_row_pairs([(src, dest, columns, config)])
+    assert results[0] is None
+
+
+def test_compare_row_pairs_normalize_types():
+    src = {"id": 1, "amount": Decimal("10.00")}
+    dest = {"id": 1, "amount": "10"}
+    columns = {"id": "id", "amount": "amount"}
+    config = {"primary_key": "id", "comparison": {"normalize_types": True}}
+    results = compare_row_pairs([(src, dest, columns, config)])
+    assert results[0] is None
