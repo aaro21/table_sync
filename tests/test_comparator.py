@@ -64,7 +64,7 @@ def test_compare_row_pairs_dataframe():
         (src1, dest1, columns, config),
         (src2, dest2, columns, config),
     ]
-    results = compare_row_pairs(pairs)
+    results = list(compare_row_pairs(pairs))
     expected_src_hash = compute_row_hash(src2)
     expected_dest_hash = compute_row_hash(dest2)
     assert results == [
@@ -88,7 +88,7 @@ def test_compare_row_pairs_only_columns():
     dest = {"id": 1, "col": "a", "extra": "y"}
     columns = {"id": "id", "col": "col", "extra": "extra"}
     config = {"primary_key": "id", "comparison": {"only_columns": ["col"]}}
-    results = compare_row_pairs([(src, dest, columns, config)])
+    results = list(compare_row_pairs([(src, dest, columns, config)]))
     assert results == []
 
 
@@ -97,5 +97,5 @@ def test_compare_row_pairs_normalize_types():
     dest = {"id": 1, "amount": "10"}
     columns = {"id": "id", "amount": "amount"}
     config = {"primary_key": "id", "comparison": {"normalize_types": True}}
-    results = compare_row_pairs([(src, dest, columns, config)])
+    results = list(compare_row_pairs([(src, dest, columns, config)]))
     assert results == []
