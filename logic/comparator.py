@@ -7,10 +7,9 @@ from datetime import datetime
 
 from typing import Any, Iterable, Optional
 import hashlib
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from dateutil import parser
-from tqdm import tqdm
 
 from utils.logger import debug_log
 
@@ -203,12 +202,12 @@ def compare_row_pairs(
     *,
     parallel: bool = False,
     workers: int = 4,
-) -> list[dict]:
-    """Compare row pairs and return mismatch details keyed by primary key."""
+) -> Iterable[dict]:
+    """Yield mismatch details for each pair keyed by primary key."""
 
     pairs = list(row_pairs)
     if not pairs:
-        return []
+        return
 
     column_map = pairs[0][2]
     config = pairs[0][3]
@@ -223,9 +222,8 @@ def compare_row_pairs(
     mismatched_pairs: list[tuple[dict, dict]] = []
 
     for src_row, dest_row, _col_map, cfg in pairs:
-        if use_row_hash:
-            if compute_row_hash(src_row) == compute_row_hash(dest_row):
-                continue
+        if use_row_hash and compute_row_hash(src_row) == compute_row_hash(dest_row):
+            continue
         mismatched_pairs.append((src_row, dest_row))
 
     debug_log(
@@ -249,21 +247,17 @@ def compare_row_pairs(
         debug_log(f"Task built for primary key {pk}", config, level="high")
 
     if not tasks:
-        return []
+        return
 
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        results = list(
-            tqdm(
-                executor.map(compare_row_pair_by_pk, tasks),
-                total=len(tasks),
-                desc="Parallel mismatch comparison",
-            )
-        )
-
-    debug_log(
-        f"{len(results)} mismatch results returned",
-        config,
-        level="medium",
-    )
-
-    return [r for r in results if r["mismatches"]]
+    if parallel:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = [executor.submit(compare_row_pair_by_pk, t) for t in tasks]
+            for future in as_completed(futures):
+                result = future.result()
+                if result["mismatches"]:
+                    yield result
+    else:
+        for task in tasks:
+            result = compare_row_pair_by_pk(task)
+            if result["mismatches"]:
+                yield result
