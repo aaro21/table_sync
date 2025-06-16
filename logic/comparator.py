@@ -8,11 +8,11 @@ from datetime import datetime
 from typing import Any, Iterable, Optional
 import hashlib
 from concurrent.futures import ProcessPoolExecutor
-from itertools import product
 
 from dateutil import parser
 from tqdm import tqdm
 import pandas as pd
+import numpy as np
 
 from utils.logger import debug_log
 
@@ -183,6 +183,9 @@ def compare_row_pairs(
     column_map = pairs[0][2]
     config = pairs[0][3]
     columns = list(column_map.keys())
+    only_cols = config.get("comparison", {}).get("only_columns")
+    if only_cols:
+        columns = [c for c in columns if c in only_cols]
     primary_key = config.get("primary_key")
     use_row_hash = config.get("comparison", {}).get("use_row_hash", False)
 
@@ -206,32 +209,49 @@ def compare_row_pairs(
         results[idx] = []
 
     if mismatched_pairs:
-        src_df = pd.DataFrame(
-            [sanitize_row(src, columns) for src, _ in mismatched_pairs]
-        )
-        dest_df = pd.DataFrame(
-            [sanitize_row(dest, columns) for _, dest in mismatched_pairs]
-        )
-        src_df["primary_key"] = [
-            src[primary_key] for src, _ in mismatched_pairs
-        ]
+        src_df = pd.DataFrame([src for src, _ in mismatched_pairs])
+        dest_df = pd.DataFrame([dest for _, dest in mismatched_pairs])
 
-        diffs = src_df[columns] != dest_df[columns]
-        print(f"Starting column diff scan on {len(mismatched_pairs)} mismatched rows and {len(columns)} columns")
-        loop = product(range(len(mismatched_pairs)), columns)
-        loop = tqdm(loop, total=len(mismatched_pairs) * len(columns), desc="Comparing mismatched columns")
-        for df_idx, col in loop:
-            if diffs.at[df_idx, col]:
-                pair_idx = mismatched_indices[df_idx]
-                mismatch = {
-                    "column": col,
-                    "source_value": src_df.at[df_idx, col],
-                    "dest_value": dest_df.at[df_idx, col],
-                }
-                if use_row_hash:
-                    mismatch["source_hash"] = hashes[df_idx][0]
-                    mismatch["dest_hash"] = hashes[df_idx][1]
-                results[pair_idx].append(mismatch)
+        for col in columns:
+            src_df[col] = src_df[col].astype(str).str.strip()
+            dest_df[col] = dest_df[col].astype(str).str.strip()
+            if config.get("comparison", {}).get("normalize_types"):
+                src_numeric = pd.to_numeric(src_df[col], errors="ignore")
+                dest_numeric = pd.to_numeric(dest_df[col], errors="ignore")
+                if pd.api.types.is_numeric_dtype(src_numeric) and pd.api.types.is_numeric_dtype(dest_numeric):
+                    src_df[col] = src_numeric
+                    dest_df[col] = dest_numeric
+                else:
+                    src_date = pd.to_datetime(src_df[col], errors="ignore")
+                    dest_date = pd.to_datetime(dest_df[col], errors="ignore")
+                    if pd.api.types.is_datetime64_any_dtype(src_date) and pd.api.types.is_datetime64_any_dtype(dest_date):
+                        src_df[col] = src_date.dt.date
+                        dest_df[col] = dest_date.dt.date
+
+        src_df["primary_key"] = [src[primary_key] for src, _ in mismatched_pairs]
+
+        diffs = src_df[columns].values != dest_df[columns].values
+        print(
+            f"Starting column diff scan on {len(mismatched_pairs)} mismatched rows and {len(columns)} columns"
+        )
+        mismatch_coords = np.where(diffs)
+        loop = tqdm(
+            zip(*mismatch_coords),
+            total=int(diffs.sum()),
+            desc="Comparing mismatched columns",
+        )
+        for row_idx, col_idx in loop:
+            logical_col = columns[col_idx]
+            pair_idx = mismatched_indices[row_idx]
+            mismatch = {
+                "column": logical_col,
+                "source_value": src_df.iat[row_idx, col_idx],
+                "dest_value": dest_df.iat[row_idx, col_idx],
+            }
+            if use_row_hash:
+                mismatch["source_hash"] = hashes[row_idx][0]
+                mismatch["dest_hash"] = hashes[row_idx][1]
+            results[pair_idx].append(mismatch)
 
     for idx in mismatched_indices:
         if results[idx] == []:
