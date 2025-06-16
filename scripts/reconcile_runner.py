@@ -151,6 +151,11 @@ def main():
                     if not diffs:
                         continue
                     for diff in diffs:
+                        debug_log(
+                            f"Writing mismatch for PK {src_key}, column {diff['column']}",
+                            config,
+                            level="high",
+                        )
                         writer.write({
                             "primary_key": src_key,
                             "type": "mismatch",
