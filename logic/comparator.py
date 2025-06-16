@@ -215,7 +215,7 @@ def compare_row_pairs(
 
     mismatched_pairs: list[tuple[dict, dict]] = []
 
-    for src_row, dest_row, _col_map, cfg in tqdm(pairs, desc="Comparing rows", total=len(pairs)):
+    for src_row, dest_row, _col_map, cfg in pairs:
         if use_row_hash:
             if compute_row_hash(src_row) == compute_row_hash(dest_row):
                 continue

@@ -1,6 +1,7 @@
 """Command line entry point for running table reconciliation."""
 
 import argparse
+from tqdm import tqdm  # Ensure tqdm is imported at the top
 
 from logic.config_loader import load_config
 from connectors.oracle_connector import get_oracle_connection
@@ -136,13 +137,15 @@ def main():
                     })
                     dest_row = next(dest_iter, None)
 
+            from tqdm import tqdm  # Ensure tqdm is imported at the top
+
             if row_pairs:
                 results = compare_row_pairs(
                     row_pairs,
                     parallel=use_parallel,
                 )
 
-                for result in results:
+                for result in tqdm(results, total=len(results), desc="Row-level diffing"):
                     src_key = result["primary_key"]
                     diffs = result["mismatches"]
                     if not diffs:
