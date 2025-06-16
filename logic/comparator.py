@@ -217,11 +217,10 @@ def compare_row_pairs(
         ]
 
         diffs = src_df[columns] != dest_df[columns]
-        for df_idx, col in tqdm(
-            product(range(len(mismatched_pairs)), columns),
-            total=len(mismatched_pairs) * len(columns),
-            desc="Comparing mismatched columns",
-        ):
+        print(f"Starting column diff scan on {len(mismatched_pairs)} mismatched rows and {len(columns)} columns")
+        loop = product(range(len(mismatched_pairs)), columns)
+        loop = tqdm(loop, total=len(mismatched_pairs) * len(columns), desc="Comparing mismatched columns")
+        for df_idx, col in loop:
             if diffs.at[df_idx, col]:
                 pair_idx = mismatched_indices[df_idx]
                 mismatch = {
