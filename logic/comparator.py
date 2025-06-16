@@ -1,9 +1,9 @@
+from __future__ import annotations
+
 from decimal import Decimal
 from datetime import datetime
 
 """Functions for comparing row dictionaries between databases."""
-
-from __future__ import annotations
 
 from typing import Any, Iterable, Optional
 import hashlib
