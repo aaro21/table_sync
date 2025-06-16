@@ -125,6 +125,9 @@ def compare_row_pair_by_pk(src_row: dict, dest_row: dict, columns: Iterable[str]
             mismatch["dest_hash"] = dest_hash
         mismatches.append(mismatch)
 
+    # Only emit a log entry if mismatches are found. Suppress messages when
+    # all columns match to avoid noisy output when processing thousands of
+    # rows during reconciliation.
     if mismatches:
         debug_log(
             f"Row {pk}: {len(mismatches)} mismatching columns",
