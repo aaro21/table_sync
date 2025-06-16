@@ -11,6 +11,7 @@ from logic.comparator import compare_rows, compare_row_pair, compare_row_pairs
 from logic.reporter import DiscrepancyWriter
 from utils.logger import debug_log
 from concurrent.futures import ThreadPoolExecutor
+from tqdm import tqdm
 
 
 def main():
@@ -145,31 +146,38 @@ def main():
                     dest_row = next(dest_iter, None)
 
             if row_pairs:
-                for result in compare_row_pairs(
-                    row_pairs,
-                    parallel=use_parallel,
-                ):
-                    src_key = result["primary_key"]
-                    for diff in result["mismatches"]:
-                        debug_log(
-                            f"Writing mismatch for PK {src_key}, column {diff['column']}",
-                            config,
-                            level="high",
-                        )
-                        writer.write({
-                            "primary_key": src_key,
-                            "type": "mismatch",
-                            "column": diff["column"],
-                            "source_value": diff["source_value"],
-                            "dest_value": diff["dest_value"],
-                            **({
-                                "source_hash": diff.get("source_hash"),
-                                "dest_hash": diff.get("dest_hash"),
-                            } if use_row_hash else {}),
-                            "year": partition["year"],
-                            "month": partition["month"],
-                            "week": partition.get("week"),
-                        })
+                sample: list[tuple[int, dict]] = []
+                with tqdm(desc="mismatched rows", unit="row") as pbar:
+                    for result in compare_row_pairs(
+                        row_pairs,
+                        parallel=use_parallel,
+                    ):
+                        src_key = result["primary_key"]
+                        if result["mismatches"]:
+                            pbar.update(1)
+                            if len(sample) < 2:
+                                sample.append((src_key, result["mismatches"][0]))
+                            for diff in result["mismatches"]:
+                                writer.write({
+                                    "primary_key": src_key,
+                                    "type": "mismatch",
+                                    "column": diff["column"],
+                                    "source_value": diff["source_value"],
+                                    "dest_value": diff["dest_value"],
+                                    **({
+                                        "source_hash": diff.get("source_hash"),
+                                        "dest_hash": diff.get("dest_hash"),
+                                    } if use_row_hash else {}),
+                                    "year": partition["year"],
+                                    "month": partition["month"],
+                                    "week": partition.get("week"),
+                                })
+                for pk, diff in sample:
+                    debug_log(
+                        f"Sample mismatch PK {pk}, column {diff['column']}: {diff['source_value']} -> {diff['dest_value']}",
+                        config,
+                        level="medium",
+                    )
 
         writer.close()
 
