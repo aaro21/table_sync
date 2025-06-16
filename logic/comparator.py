@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any, Iterable, Optional
 import hashlib
 from concurrent.futures import ProcessPoolExecutor
+from itertools import product
 
 from dateutil import parser
 from tqdm import tqdm
@@ -216,23 +217,22 @@ def compare_row_pairs(
         ]
 
         diffs = src_df[columns] != dest_df[columns]
-        for df_idx in range(len(mismatched_pairs)):
-            for col in tqdm(
-                columns,
-                desc=f"Checking mismatches for row {df_idx+1}/{len(mismatched_pairs)}",
-                leave=False,
-            ):
-                if diffs.at[df_idx, col]:
-                    pair_idx = mismatched_indices[df_idx]
-                    mismatch = {
-                        "column": col,
-                        "source_value": src_df.at[df_idx, col],
-                        "dest_value": dest_df.at[df_idx, col],
-                    }
-                    if use_row_hash:
-                        mismatch["source_hash"] = hashes[df_idx][0]
-                        mismatch["dest_hash"] = hashes[df_idx][1]
-                    results[pair_idx].append(mismatch)
+        for df_idx, col in tqdm(
+            product(range(len(mismatched_pairs)), columns),
+            total=len(mismatched_pairs) * len(columns),
+            desc="Comparing mismatched columns",
+        ):
+            if diffs.at[df_idx, col]:
+                pair_idx = mismatched_indices[df_idx]
+                mismatch = {
+                    "column": col,
+                    "source_value": src_df.at[df_idx, col],
+                    "dest_value": dest_df.at[df_idx, col],
+                }
+                if use_row_hash:
+                    mismatch["source_hash"] = hashes[df_idx][0]
+                    mismatch["dest_hash"] = hashes[df_idx][1]
+                results[pair_idx].append(mismatch)
 
     for idx in mismatched_indices:
         if results[idx] == []:
