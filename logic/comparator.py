@@ -235,11 +235,8 @@ def compare_row_pairs(
             f"Starting column diff scan on {len(mismatched_pairs)} mismatched rows and {len(columns)} columns"
         )
         mismatch_coords = np.where(diffs)
-        loop = tqdm(
-            zip(*mismatch_coords),
-            total=int(diffs.sum()),
-            desc="Comparing mismatched columns",
-        )
+        loop_coords = list(zip(*mismatch_coords))
+        loop = tqdm(loop_coords, total=len(loop_coords), desc="Comparing mismatched columns")
         for row_idx, col_idx in loop:
             logical_col = columns[col_idx]
             pair_idx = mismatched_indices[row_idx]
