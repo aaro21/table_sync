@@ -234,7 +234,12 @@ def compare_row_pairs(
 
         with ThreadPoolExecutor(max_workers=workers) as executor:
             futures = [executor.submit(compare_row_pair_by_pk, *t) for t in tasks]
-            for future in as_completed(futures):
+            for future in tqdm(
+                as_completed(futures),
+                total=len(futures),
+                desc="Comparing mismatched rows",
+                unit="row",
+            ):
                 result = future.result()
                 if result:
                     yield result
