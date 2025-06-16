@@ -10,6 +10,7 @@ from runners.reconcile import fetch_rows
 from logic.comparator import compare_rows, compare_row_pair, compare_row_pairs
 from logic.reporter import DiscrepancyWriter
 from utils.logger import debug_log
+from concurrent.futures import ThreadPoolExecutor
 
 
 def main():
@@ -58,36 +59,43 @@ def main():
                 level="low",
             )
 
-            src_rows = list(
-                fetch_rows(
-                    src_conn,
-                    src_schema,
-                    src_table,
-                    src_cols,
-                    partition,
-                    primary_key,
-                    year_column,
-                    month_column,
-                    dialect=src_dialect,
-                    week_column=week_column,
-                    config=config,
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                src_future = executor.submit(
+                    lambda: list(
+                        fetch_rows(
+                            src_conn,
+                            src_schema,
+                            src_table,
+                            src_cols,
+                            partition,
+                            primary_key,
+                            year_column,
+                            month_column,
+                            dialect=src_dialect,
+                            week_column=week_column,
+                            config=config,
+                        )
+                    )
                 )
-            )
-            dest_rows = list(
-                fetch_rows(
-                    dest_conn,
-                    dest_schema,
-                    dest_table,
-                    dest_cols,
-                    partition,
-                    primary_key,
-                    year_column,
-                    month_column,
-                    dialect=dest_dialect,
-                    week_column=week_column,
-                    config=config,
+                dest_future = executor.submit(
+                    lambda: list(
+                        fetch_rows(
+                            dest_conn,
+                            dest_schema,
+                            dest_table,
+                            dest_cols,
+                            partition,
+                            primary_key,
+                            year_column,
+                            month_column,
+                            dialect=dest_dialect,
+                            week_column=week_column,
+                            config=config,
+                        )
+                    )
                 )
-            )
+                src_rows = src_future.result()
+                dest_rows = dest_future.result()
 
             debug_log(
                 f"Fetched {len(src_rows)} source rows and {len(dest_rows)} destination rows",
