@@ -65,16 +65,20 @@ def test_compare_row_pairs_dataframe():
         (src2, dest2, columns, config),
     ]
     results = compare_row_pairs(pairs)
-    assert results[0] is None
     expected_src_hash = compute_row_hash(src2)
     expected_dest_hash = compute_row_hash(dest2)
-    assert results[1] == [
+    assert results == [
         {
-            "column": "col",
-            "source_value": "b",
-            "dest_value": "c",
-            "source_hash": expected_src_hash,
-            "dest_hash": expected_dest_hash,
+            "primary_key": 2,
+            "mismatches": [
+                {
+                    "column": "col",
+                    "source_value": "b",
+                    "dest_value": "c",
+                    "source_hash": expected_src_hash,
+                    "dest_hash": expected_dest_hash,
+                }
+            ],
         }
     ]
 
@@ -85,7 +89,7 @@ def test_compare_row_pairs_only_columns():
     columns = {"id": "id", "col": "col", "extra": "extra"}
     config = {"primary_key": "id", "comparison": {"only_columns": ["col"]}}
     results = compare_row_pairs([(src, dest, columns, config)])
-    assert results[0] is None
+    assert results == []
 
 
 def test_compare_row_pairs_normalize_types():
@@ -94,4 +98,4 @@ def test_compare_row_pairs_normalize_types():
     columns = {"id": "id", "amount": "amount"}
     config = {"primary_key": "id", "comparison": {"normalize_types": True}}
     results = compare_row_pairs([(src, dest, columns, config)])
-    assert results[0] is None
+    assert results == []
