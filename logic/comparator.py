@@ -1,3 +1,6 @@
+from decimal import Decimal
+from datetime import datetime
+
 """Functions for comparing row dictionaries between databases."""
 
 from __future__ import annotations
@@ -134,8 +137,8 @@ def compare_rows(
             return mismatches
     column_iter = column_map.keys()
     for logical_col in column_iter:
-        src_val = source_row.get(logical_col)
-        dest_val = dest_row.get(logical_col)
+        src_val = sanitize(source_row.get(logical_col))
+        dest_val = sanitize(dest_row.get(logical_col))
         if not values_equal(src_val, dest_val):
             debug_log(
                 f"MISMATCH: col={logical_col}, src={src_val}, dest={dest_val}",
@@ -213,12 +216,12 @@ def compare_row_pairs(
         ]
 
         diffs = src_df[columns] != dest_df[columns]
-        for df_idx in tqdm(
-            range(len(mismatched_pairs)),
-            desc="Checking mismatches",
-            total=len(mismatched_pairs),
-        ):
-            for col in columns:
+        for df_idx in range(len(mismatched_pairs)):
+            for col in tqdm(
+                columns,
+                desc=f"Checking mismatches for row {df_idx+1}/{len(mismatched_pairs)}",
+                leave=False,
+            ):
                 if diffs.at[df_idx, col]:
                     pair_idx = mismatched_indices[df_idx]
                     mismatch = {
