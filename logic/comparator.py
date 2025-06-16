@@ -93,9 +93,10 @@ def compare_row_pair(args: tuple) -> Optional[list[dict]]:
     )
 
 
-def compare_row_pair_by_pk(args: tuple) -> dict:
+def compare_row_pair_by_pk(src_row: dict, dest_row: dict, columns: Iterable[str], config: dict) -> dict:
     """Compare two rows and return mismatches keyed by primary key."""
-    pk, src_row, dest_row, columns, config = args
+    pk_col = config.get("columns", {}).get("primary_key", config.get("primary_key"))
+    pk = src_row.get(pk_col)
     include_nulls = config.get("comparison", {}).get("include_nulls", False)
     use_row_hash = config.get("comparison", {}).get("use_row_hash", False)
 
@@ -124,11 +125,12 @@ def compare_row_pair_by_pk(args: tuple) -> dict:
             mismatch["dest_hash"] = dest_hash
         mismatches.append(mismatch)
 
-    debug_log(
-        f"Row {pk}: {len(mismatches)} mismatching columns",
-        config,
-        level="medium",
-    )
+    if mismatches:
+        debug_log(
+            f"Row {pk}: {len(mismatches)} mismatching columns",
+            config,
+            level="medium",
+        )
     return {"primary_key": pk, "mismatches": mismatches}
 
 
@@ -205,59 +207,43 @@ def compare_row_pairs(
 ) -> Iterable[dict]:
     """Yield mismatch details for each pair keyed by primary key."""
 
-    pairs = list(row_pairs)
-    if not pairs:
-        return
-
-    column_map = pairs[0][2]
-    config = pairs[0][3]
-    columns = list(column_map.keys())
-    only_cols = config.get("comparison", {}).get("only_columns")
-    if only_cols:
-        columns = [c for c in columns if c in only_cols]
-
-    pk_col = config.get("columns", {}).get("primary_key", config.get("primary_key"))
-    use_row_hash = config.get("comparison", {}).get("use_row_hash", False)
-
-    mismatched_pairs: list[tuple[dict, dict]] = []
-
-    for src_row, dest_row, _col_map, cfg in pairs:
-        if use_row_hash and compute_row_hash(src_row) == compute_row_hash(dest_row):
-            continue
-        mismatched_pairs.append((src_row, dest_row))
-
-    debug_log(
-        f"{len(mismatched_pairs)} mismatched pairs after hash filter",
-        config,
-        level="medium",
-    )
-
-    tasks = [
-        (
-            src[pk_col],
-            src,
-            dest,
-            columns,
-            config,
-        )
-        for src, dest in mismatched_pairs
-    ]
-
-    for pk, *_ in tasks:
-        debug_log(f"Task built for primary key {pk}", config, level="high")
-
-    if not tasks:
-        return
-
     if parallel:
+        tasks: list[tuple] = []
+        for src_row, dest_row, col_map, config in row_pairs:
+            use_row_hash = config.get("comparison", {}).get("use_row_hash", False)
+            if use_row_hash:
+                src_hash = compute_row_hash(src_row)
+                dest_hash = compute_row_hash(dest_row)
+                if src_hash == dest_hash:
+                    continue
+            pk_col = config.get("columns", {}).get("primary_key", config.get("primary_key"))
+            columns = list(col_map.keys())
+            only_cols = config.get("comparison", {}).get("only_columns")
+            if only_cols:
+                columns = [c for c in columns if c in only_cols]
+            tasks.append((src_row, dest_row, columns, config))
+
+        if not tasks:
+            return
+
         with ThreadPoolExecutor(max_workers=workers) as executor:
-            futures = [executor.submit(compare_row_pair_by_pk, t) for t in tasks]
+            futures = [executor.submit(compare_row_pair_by_pk, *t) for t in tasks]
             for future in as_completed(futures):
                 result = future.result()
                 if result["mismatches"]:
                     yield result
     else:
-        for task in tasks:
-            result = compare_row_pair_by_pk(task)
+        for src_row, dest_row, col_map, config in row_pairs:
+            use_row_hash = config.get("comparison", {}).get("use_row_hash", False)
+            if use_row_hash:
+                src_hash = compute_row_hash(src_row)
+                dest_hash = compute_row_hash(dest_row)
+                if src_hash == dest_hash:
+                    continue
+            columns = list(col_map.keys())
+            only_cols = config.get("comparison", {}).get("only_columns")
+            if only_cols:
+                columns = [c for c in columns if c in only_cols]
+            result = compare_row_pair_by_pk(src_row, dest_row, columns, config)
             if result["mismatches"]:
                 yield result
