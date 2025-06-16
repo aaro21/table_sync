@@ -26,7 +26,9 @@ def normalize_value(val: Any) -> str:
 
 def compute_row_hash(row: dict) -> str:
     """Generate a consistent hash for the provided row."""
-    values = [normalize_value(v) for v in row.values()]
+    # Sort keys to ensure deterministic ordering between source and dest rows
+    ordered_keys = sorted(row.keys())
+    values = [normalize_value(row[k]) for k in ordered_keys]
     joined = "|".join(values)
     return hashlib.sha256(joined.encode("utf-8")).hexdigest()
 
@@ -123,6 +125,11 @@ def compare_row_pair_by_pk(args: tuple) -> dict:
             mismatch["dest_hash"] = dest_hash
         mismatches.append(mismatch)
 
+    debug_log(
+        f"Row {pk}: {len(mismatches)} mismatching columns",
+        config,
+        level="medium",
+    )
     return {"primary_key": pk, "mismatches": mismatches}
 
 
@@ -221,10 +228,25 @@ def compare_row_pairs(
                 continue
         mismatched_pairs.append((src_row, dest_row))
 
+    debug_log(
+        f"{len(mismatched_pairs)} mismatched pairs after hash filter",
+        config,
+        level="medium",
+    )
+
     tasks = [
-        (src[pk_col], src, dest, columns, config)
+        (
+            src[pk_col],
+            src,
+            dest,
+            columns,
+            config,
+        )
         for src, dest in mismatched_pairs
     ]
+
+    for pk, *_ in tasks:
+        debug_log(f"Task built for primary key {pk}", config, level="high")
 
     if not tasks:
         return []
@@ -237,5 +259,11 @@ def compare_row_pairs(
                 desc="Parallel mismatch comparison",
             )
         )
+
+    debug_log(
+        f"{len(results)} mismatch results returned",
+        config,
+        level="medium",
+    )
 
     return [r for r in results if r["mismatches"]]
