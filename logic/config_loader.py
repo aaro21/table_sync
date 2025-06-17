@@ -1,4 +1,8 @@
-"""Load YAML configuration and resolve environment variables."""
+"""Load YAML configuration and resolve environment variables.
+
+The loader normalises column mappings, resolves environment variables defined in
+the configuration and performs a minimal sanity check for required sections.
+"""
 
 import yaml
 import os
@@ -13,7 +17,9 @@ def get_env_var(name: str) -> str:
     """Return the value of ``name`` from the OS environment or raise."""
     value = os.getenv(name)
     if value is None:
-        raise EnvironmentError(f"Environment variable '{name}' is missing or unset.")
+        raise EnvironmentError(
+            f"Environment variable '{name}' is missing or unset."
+        )
     return value
 
 
@@ -27,10 +33,23 @@ def resolve_env_vars(env_map: dict, debug: str | bool = "low") -> dict:
     return {k: get_env_var(v) for k, v in env_map.items()}
 
 
+def validate_config(config: dict) -> None:
+    """Perform a light sanity check on *config*."""
+    required = ["source", "destination", "primary_key", "partitioning"]
+    for key in required:
+        if key not in config:
+            raise KeyError(f"Missing required config section '{key}'")
+
+
 def load_config(path: str = "config/config.yaml") -> dict:
     """Load configuration from *path* and inject resolved credentials."""
-    with open(path, "r") as f:
-        raw_config = yaml.safe_load(f)
+    try:
+        with open(path, "r") as f:
+            raw_config = yaml.safe_load(f)
+    except FileNotFoundError as exc:  # pragma: no cover - config missing
+        raise FileNotFoundError(f"Config file not found: {path}") from exc
+
+    validate_config(raw_config)
 
     raw_debug = raw_config.get("debug", "low")
     if isinstance(raw_debug, bool):

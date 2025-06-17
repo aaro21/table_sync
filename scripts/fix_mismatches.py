@@ -74,7 +74,8 @@ def fix_mismatches(config: Dict, *, dry_run: Optional[bool] = None) -> None:
                     f"dest.[{month_col}] = src.[month]",
                 ]
                 if "week" in partition:
-                    dest_week_col = dest_cols.get(config["partitioning"].get("week_column"), config["partitioning"].get("week_column"))
+                    week_key = config["partitioning"].get("week_column", "week")
+                    dest_week_col = dest_cols.get(week_key, week_key)
                     join_on.append(f"dest.[{dest_week_col}] = src.[week]")
 
                 join_clause = " AND ".join(join_on)
@@ -112,6 +113,8 @@ def fix_mismatches(config: Dict, *, dry_run: Optional[bool] = None) -> None:
 
 
 def main() -> None:
+    """Command line wrapper around :func:`fix_mismatches`."""
+
     parser = argparse.ArgumentParser(description="Apply fixes for mismatched rows")
     parser.add_argument("--apply", action="store_true", help="execute updates")
     parser.add_argument("--no-dry-run", dest="dry_run", action="store_false", help="disable dry run")
