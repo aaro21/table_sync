@@ -136,7 +136,7 @@ def compare_row_pair_by_pk(
     for col in columns:
         src_val = sanitize(src_row.get(col))
         dest_val = sanitize(dest_row.get(col))
-        debug_log(f"  {col}: src={src_val} dest={dest_val}", config, level="low")
+        debug_log(f"  {col}: src={src_val} dest={dest_val}", config, level="high")
 
     mismatches: list[dict] = []
     for col in columns:
