@@ -6,7 +6,7 @@ from datetime import datetime
 """Functions for comparing row dictionaries between databases."""
 
 from typing import Any, Iterable, Optional, Tuple, List
-import hashlib
+import xxhash
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from dateutil import parser
@@ -32,12 +32,22 @@ def normalize_value(val: Any) -> str:
 
 
 def compute_row_hash(row: dict) -> str:
-    """Generate a consistent hash for the provided row."""
-    # Sort keys to ensure deterministic ordering between source and dest rows
+    """Generate a consistent and fast hash for the provided row."""
     ordered_keys = sorted(row.keys())
-    values = [normalize_value(row[k]) for k in ordered_keys]
-    joined = "|".join(values)
-    return hashlib.sha256(joined.encode("utf-8")).hexdigest()
+    h = xxhash.xxh64()
+    for k in ordered_keys:
+        val = normalize_value(row.get(k))
+        h.update(val.encode("utf-8"))
+    return h.hexdigest()
+
+
+def compute_row_hashes_parallel(rows: list[dict], *, workers: int = 4) -> list[str]:
+    """Compute hashes for rows in parallel."""
+    def _hash_row(row: dict) -> str:
+        return compute_row_hash(row)
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        return list(executor.map(_hash_row, rows))
 
 
 def _hash_pair(pair: tuple) -> tuple[str, str]:
@@ -267,12 +277,15 @@ def compare_row_pairs_serial(
         only_cols = config.get("comparison", {}).get("only_columns")
         if only_cols:
             cols = [c for c in cols if c in only_cols]
+        src_hashes, dest_hashes = compute_row_hashes_parallel([src_row, dest_row], workers=2)
+        src_hash, dest_hash = src_hashes[0], dest_hashes[1]
         result = compare_row_pair_by_pk(
             src_row,
             dest_row,
             cols,
             config,
             partition=part,
+            hashes=(src_hash, dest_hash),
         )
         count += 1
         if progress is not None:
@@ -335,6 +348,8 @@ def compare_row_pairs_parallel_detailed(
             only_cols = config.get("comparison", {}).get("only_columns")
             if only_cols:
                 cols = [c for c in cols if c in only_cols]
+            src_hashes, dest_hashes = compute_row_hashes_parallel([src_row, dest_row], workers=2)
+            src_hash, dest_hash = src_hashes[0], dest_hashes[1]
             tasks.append(
                 executor.submit(
                     compare_row_pair_by_pk,
@@ -343,6 +358,7 @@ def compare_row_pairs_parallel_detailed(
                     cols,
                     config,
                     partition=part,
+                    hashes=(src_hash, dest_hash),
                 )
             )
 
