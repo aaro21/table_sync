@@ -78,6 +78,7 @@ def main():
         with get_oracle_connection(src_env, config) as src_conn, get_sqlserver_connection(dest_env, config) as dest_conn, DiscrepancyWriter(dest_conn, output_schema, output_table) as writer:
 
             def write_record(record: dict) -> None:
+                debug_log(f"WRITING: {record}", config, level="medium")
                 writer.write(record)
                 if config.get("output_mismatches"):
                     print(record)
@@ -222,6 +223,8 @@ def main():
                 )
 
             debug_log("Reconciliation complete", config, level="low")
+
+        debug_log("Writer context exited — flush should have occurred", config, level="low")
 
     except Exception as exc:  # pragma: no cover - runtime failure
         debug_log(f"Reconciliation failed: {exc}", config, level="low")

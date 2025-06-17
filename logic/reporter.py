@@ -3,6 +3,7 @@
 import csv
 import os
 from typing import Iterable, List, Dict, Any
+from logic.utils import debug_log
 try:
     import pyodbc
 except Exception:  # pragma: no cover - optional dependency
@@ -35,6 +36,7 @@ class DiscrepancyWriter:
         column_defs = ", ".join(f"[{c}] NVARCHAR(MAX)" for c in self.columns)
         create_sql = f"CREATE TABLE {full_table} ({column_defs})"
         cursor.execute(create_sql)
+        debug_log(f"Creating discrepancy table: {full_table}", {}, level="low")
         self.conn.commit()
         self.prepared = True
 
@@ -45,7 +47,9 @@ class DiscrepancyWriter:
             self.flush()
 
     def flush(self):
+        debug_log("Flushing buffer to SQL Server", {}, level="low")
         if not self.buffer:
+            debug_log("Flush called but buffer is empty.", {}, level="low")
             return
         cursor = self.conn.cursor()
         full_table = self._full_table()
@@ -55,8 +59,13 @@ class DiscrepancyWriter:
             f"VALUES ({placeholders})"
         )
         values = [[rec.get(c) for c in self.columns] for rec in self.buffer]
-        cursor.executemany(insert_sql, values)
-        self.conn.commit()
+        try:
+            cursor.executemany(insert_sql, values)
+            self.conn.commit()
+            debug_log(f"Inserted {len(values)} rows into {full_table}", {}, level="low")
+        except Exception as e:
+            debug_log(f"Failed to insert rows into {full_table}: {e}", {}, level="high")
+            raise
         self.buffer.clear()
 
     def close(self):
