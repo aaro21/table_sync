@@ -163,11 +163,11 @@ def main():
                 for result in compare_row_pairs(
                     generate_pairs(),
                     parallel=use_parallel,
+                    progress=pbar,
                 ):
                     src_key = result["primary_key"]
                     part = result.get("partition", {})
                     if result["mismatches"]:
-                        pbar.update(1)
                         if src_key not in seen_pks and len(sample) < 2:
                             sample.append((src_key, result["mismatches"][0]))
                             seen_pks.add(src_key)

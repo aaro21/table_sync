@@ -223,6 +223,7 @@ def compare_row_pairs(
     *,
     parallel: bool = False,
     workers: int = 4,
+    progress=None,
 ) -> Iterable[dict]:
     """Yield mismatch details for each pair keyed by primary key.
 
@@ -262,12 +263,18 @@ def compare_row_pairs(
         debug_log("All rows skipped after hash match filtering", cfg_ref)
         return
 
+    original_total = len(tasks)
+    if progress is not None:
+        progress.total = original_total
+        progress.refresh()
+
     # ------------------------------------------------------------------
     # Phase 2 - compare the mismatching pairs, optionally in parallel.
     # ------------------------------------------------------------------
     if parallel:
+        task_map = {i: t for i, t in enumerate(tasks)}
         with ThreadPoolExecutor(max_workers=workers) as executor:
-            futures = [
+            futures = {
                 executor.submit(
                     compare_row_pair_by_pk,
                     src,
@@ -276,22 +283,21 @@ def compare_row_pairs(
                     cfg,
                     hashes=hashes,
                     partition=part,
-                )
-                for src, dest, cols, cfg, hashes, part in tasks
-            ]
-            for future in tqdm(
-                as_completed(futures),
-                total=len(futures),
-                desc="Comparing mismatched rows",
-                unit="row",
-            ):
+                ): i
+                for i, (src, dest, cols, cfg, hashes, part) in task_map.items()
+            }
+            for future in as_completed(futures):
+                idx = futures[future]
                 result = future.result()
+                task_map.pop(idx, None)
+                if progress is not None:
+                    progress.n = original_total - len(task_map)
+                    progress.refresh()
                 if result:
                     yield result
     else:
-        for src, dest, cols, cfg, hashes, part in tqdm(
-            tasks, desc="Comparing mismatched rows", unit="row"
-        ):
+        while tasks:
+            src, dest, cols, cfg, hashes, part = tasks.pop(0)
             result = compare_row_pair_by_pk(
                 src,
                 dest,
@@ -300,5 +306,8 @@ def compare_row_pairs(
                 hashes=hashes,
                 partition=part,
             )
+            if progress is not None:
+                progress.n = original_total - len(tasks)
+                progress.refresh()
             if result:
                 yield result
