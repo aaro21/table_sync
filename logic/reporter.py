@@ -3,7 +3,7 @@
 import csv
 import os
 from typing import Iterable, List, Dict, Any
-from logic.utils import debug_log
+from utils.logger import debug_log
 try:
     import pyodbc
 except Exception:  # pragma: no cover - optional dependency
