@@ -189,7 +189,6 @@ def main():
                 for result in compare_row_pairs(
                     generate_pairs(),
                     workers=workers,
-                    parallel=use_parallel,
                     progress=pbar,
                 ):
                     debug_log(f"Compare result: {result}", config, level="low")
