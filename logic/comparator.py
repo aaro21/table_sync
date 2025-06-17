@@ -50,7 +50,7 @@ def _hash_row(row: dict) -> str:
 def compute_row_hashes_parallel(rows: list[dict], *, workers: int = 4, mode: str = "thread") -> list[str]:
     """Compute hashes for rows in parallel using thread or process mode."""
     Executor = ThreadPoolExecutor if mode == "thread" else ProcessPoolExecutor
-    debug_log(f"Using {Executor.__name__} for parallel hashing", None, level="low")
+    debug_log(f"Using {Executor.__name__} for parallel hashing", None, level="high")
     with Executor(max_workers=workers) as executor:
         return list(executor.map(_hash_row, rows))
 
