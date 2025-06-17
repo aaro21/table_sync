@@ -335,6 +335,7 @@ def compare_row_pairs(
                     progress.n += 1
                     progress.refresh()
             if result:
+                debug_log(f"Yielding mismatch result for PK={result.get('primary_key')}: {result}", config, level="low")
                 yield result
 
         if progress is not None and progress.total is None:
