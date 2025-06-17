@@ -33,6 +33,12 @@ def compute_row_hash(row: dict) -> str:
     return hashlib.sha256(joined.encode("utf-8")).hexdigest()
 
 
+def _hash_pair(pair: tuple) -> tuple[str, str]:
+    """Return ``(src_hash, dest_hash)`` for a row pair."""
+    src_row, dest_row = pair[0], pair[1]
+    return compute_row_hash(src_row), compute_row_hash(dest_row)
+
+
 def values_equal(source_val: Any, dest_val: Any) -> bool:
     """Return ``True`` if the two provided values should be considered equal."""
     # Attempt numeric comparison with tolerance
@@ -234,22 +240,44 @@ def compare_row_pairs(
     """
 
     # ------------------------------------------------------------------
-    # Phase 1 - compute row hashes and collect only the pairs that differ.
+    # Phase 1 - compute row hashes (optionally in parallel) and collect
+    # only the pairs whose hashes differ.
     # ------------------------------------------------------------------
     tasks: List[tuple] = []
     cfg_ref: Optional[dict] = None
-    for item in tqdm(row_pairs, desc="Filtering matched hashes", unit="row"):
+
+    # Materialize row pairs so we can compute hashes in parallel
+    pairs: List[tuple] = []
+    for item in row_pairs:
         if len(item) == 4:
             src_row, dest_row, col_map, config = item
             partition = None
         else:
             src_row, dest_row, col_map, config, partition = item
         cfg_ref = config
+        pairs.append((src_row, dest_row, col_map, config, partition))
+
+    if not pairs:
+        return
+    if parallel:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            hash_iter = executor.map(_hash_pair, pairs)
+            hash_iter = tqdm(
+                hash_iter,
+                total=len(pairs),
+                desc="Filtering matched hashes",
+                unit="row",
+            )
+            hashes_list = list(hash_iter)
+    else:
+        hashes_list = []
+        for p in tqdm(pairs, desc="Filtering matched hashes", unit="row", total=len(pairs)):
+            hashes_list.append(_hash_pair(p))
+
+    for (src_row, dest_row, col_map, config, partition), (src_hash, dest_hash) in zip(pairs, hashes_list):
         use_row_hash = config.get("comparison", {}).get("use_row_hash", False)
         pair_hashes: Tuple[str, str] | None = None
         if use_row_hash:
-            src_hash = compute_row_hash(src_row)
-            dest_hash = compute_row_hash(dest_row)
             if src_hash == dest_hash:
                 continue
             pair_hashes = (src_hash, dest_hash)
