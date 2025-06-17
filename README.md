@@ -37,6 +37,15 @@ Passing the `--debug` flag or setting a debug level in the YAML
 configuration enables logging output. Supported levels are `low`,
 `medium` and `high`, where `high` produces the most verbose output.
 
+To limit the number of rows fetched during testing, pass the `--limit`
+option to `reconcile_runner.py`:
+
+```bash
+python scripts/reconcile_runner.py --limit 50000
+```
+This restricts the amount of data retrieved from each table by applying a
+`FETCH FIRST`/`OFFSET` clause in the SQL queries, which speeds up test runs.
+
 This repository is intentionally minimal and focuses only on the core
 logic for comparing tables. Many features are missing, including retry
 logic, logging and tests.
