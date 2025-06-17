@@ -416,14 +416,60 @@ def compare_row_pairs(
 
     use_parallel = config.get("comparison", {}).get("parallel", False) if config else False
     parallel_mode = config.get("comparison", {}).get("parallel_mode", "thread") if config else "thread"
+    use_two_phase = config.get("comparison", {}).get("two_phase", False) if config else False
 
-    debug_log(f"Dispatching comparison with use_parallel={use_parallel}, mode={parallel_mode}", config, level="medium")
+    debug_log(f"Dispatching comparison with use_parallel={use_parallel}, mode={parallel_mode}, two_phase={use_two_phase}", config, level="medium")
+
+    if use_two_phase:
+        return compare_row_pairs_in_two_phases(row_pairs, workers=workers, progress=progress)
 
     if use_parallel:
         if parallel_mode == "batch":
             return compare_row_pairs_serial_parallel_batches(row_pairs, workers=workers, progress=progress)
         return compare_row_pairs_parallel_detailed(row_pairs, workers=workers, progress=progress)
     yield from compare_row_pairs_serial(row_pairs, progress=progress)
+
+
+# Two-phase comparison: hash filter then detailed compare
+def compare_row_pairs_in_two_phases(
+    row_pairs: Iterable[tuple],
+    *,
+    workers: int = 4,
+    progress=None,
+) -> Iterable[dict]:
+    """Two-phase comparison: first filter using hash mismatch, then compare details."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    row_pairs = list(row_pairs)
+    if not row_pairs:
+        return
+
+    config = None
+    for item in row_pairs:
+        if len(item) >= 4:
+            config = item[3]
+            break
+
+    debug_log(f"Phase 1: Filtering row pairs using hashes", config, level="medium")
+
+    def is_mismatch(pair):
+        if len(pair) == 4:
+            src_row, dest_row, col_map, cfg = pair
+            part = None
+        else:
+            src_row, dest_row, col_map, cfg, part = pair
+        src_hash, dest_hash = compute_row_hash(src_row), compute_row_hash(dest_row)
+        return (src_hash != dest_hash, (src_row, dest_row, col_map, cfg, part if part else None))
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        filtered = list(executor.map(is_mismatch, row_pairs))
+
+    mismatched = [row for matched, row in filtered if matched]
+
+    debug_log(f"Phase 1 complete: {len(mismatched)} mismatched row pairs out of {len(row_pairs)}", config, level="medium")
+
+    debug_log(f"Phase 2: Running detailed comparison on mismatches", config, level="medium")
+    yield from compare_row_pairs_serial(mismatched, progress=progress)
 
 
 # New function for batch parallelization
