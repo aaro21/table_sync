@@ -16,7 +16,14 @@ from tqdm import tqdm
 
 
 def normalize_value(val: Any) -> str:
-    """Normalize a single value for hashing consistency."""
+    """Normalize a single value for hashing consistency.
+
+    The same sanitization rules used for direct value comparisons are
+    applied here so that logically equivalent values (e.g. ``18.2`` and
+    ``18.20`` or date strings with and without a time component) hash to
+    the same value.
+    """
+    val = sanitize(val)
     if val is None:
         return "NULL"
     if isinstance(val, float):
@@ -245,6 +252,7 @@ def compare_row_pairs(
     # ------------------------------------------------------------------
     tasks: List[tuple] = []
     cfg_ref: Optional[dict] = None
+    mismatch_count = 0
 
     # Materialize row pairs so we can compute hashes in parallel
     pairs: List[tuple] = []
@@ -284,12 +292,14 @@ def compare_row_pairs(
                 continue
             pk_field = config.get("primary_key")
             pk_val = src_row.get(pk_field)
-            debug_log(
-                f"Hash mismatch for row {pk_val}: src_hash={src_hash}, dest_hash={dest_hash}; src={src_row}, dest={dest_row}",
-                config,
-                level="high",
-            )
+            if mismatch_count % 1000 == 0:
+                debug_log(
+                    f"Hash mismatch for row {pk_val}: src_hash={src_hash}, dest_hash={dest_hash}; src={src_row}, dest={dest_row}",
+                    config,
+                    level="high",
+                )
             pair_hashes = (src_hash, dest_hash)
+            mismatch_count += 1
         columns = list(col_map.keys())
         only_cols = config.get("comparison", {}).get("only_columns")
         if only_cols:

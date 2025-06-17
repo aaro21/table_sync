@@ -99,3 +99,25 @@ def test_compare_row_pairs_normalize_types():
     config = {"primary_key": "id", "comparison": {"normalize_types": True}}
     results = list(compare_row_pairs([(src, dest, columns, config)]))
     assert results == []
+
+
+def test_compute_row_hash_normalizes_equivalent_values():
+    src = {
+        "id": 1,
+        "date": "2021-01-01 00:00:00",
+        "num": "18.20",
+    }
+    dest = {
+        "id": 1,
+        "date": "2021-01-01",
+        "num": 18.2,
+    }
+    assert compute_row_hash(src) == compute_row_hash(dest)
+
+
+def test_row_hash_skip_after_normalization():
+    src = {"id": 1, "val": "18.20"}
+    dest = {"id": 1, "val": "18.2"}
+    columns = {"id": "id", "val": "val"}
+    diffs = compare_rows(src, dest, columns, use_row_hash=True)
+    assert diffs == []
