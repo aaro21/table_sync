@@ -292,8 +292,8 @@ def compare_row_pairs_serial(
     df_dest = pd.DataFrame(dest_rows)[columns]
 
     # Sanitize using vectorized logic
-    df_src = df_src.applymap(sanitize)
-    df_dest = df_dest.applymap(sanitize)
+    df_src = df_src.map(sanitize)
+    df_dest = df_dest.map(sanitize)
 
     from concurrent.futures import ThreadPoolExecutor
 
