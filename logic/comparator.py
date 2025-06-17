@@ -7,7 +7,7 @@ from datetime import datetime
 
 from typing import Any, Iterable, Optional, Tuple, List
 import hashlib
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
 
 from dateutil import parser
 
@@ -240,105 +240,78 @@ def compare_row_pairs(
 ) -> Iterable[dict]:
     """Yield mismatch details for each pair keyed by primary key.
 
-    ``row_pairs`` should yield ``(src_row, dest_row, columns, config)`` tuples.
-    This function first filters the incoming pairs using row hashes and stores
-    the ones that differ. The mismatching pairs are then compared, optionally in
-    parallel. Progress bars are displayed for both phases using ``tqdm``.
+    ``row_pairs`` must yield ``(src_row, dest_row, columns, config)`` tuples and
+    may optionally include a partition mapping as a 5th element. The previous
+    implementation materialised all pairs before processing which meant progress
+    bars only appeared once the entire input was exhausted. This streaming
+    version processes each pair as it arrives so progress is updated in real
+    time. Row hashing and column filtering are handled per pair and results are
+    yielded immediately.
     """
 
-    # ------------------------------------------------------------------
-    # Phase 1 - compute row hashes (optionally in parallel) and collect
-    # only the pairs whose hashes differ.
-    # ------------------------------------------------------------------
-    tasks: List[tuple] = []
     cfg_ref: Optional[dict] = None
-    mismatch_count = 0
 
-    # Materialize row pairs so we can compute hashes in parallel
-    pairs: List[tuple] = []
-    for item in row_pairs:
-        if len(item) == 4:
-            src_row, dest_row, col_map, config = item
-            partition = None
-        else:
-            src_row, dest_row, col_map, config, partition = item
-        cfg_ref = config
-        pairs.append((src_row, dest_row, col_map, config, partition))
+    # Determine total count up front when possible so callers like ``tqdm``
+    # can display bounded progress bars. If ``row_pairs`` has no length,
+    # ``total`` remains ``None`` and the bar will be unbounded.
+    total = None
+    try:  # pragma: no cover - ``row_pairs`` may not be sized
+        total = len(row_pairs)  # type: ignore[arg-type]
+    except Exception:
+        pass
 
-    if not pairs:
-        return
-
-    debug_log("Phase 1: hashing row pairs", cfg_ref, level="low")
-    if parallel:
-        with ThreadPoolExecutor(max_workers=workers) as executor:
-            hash_iter = executor.map(_hash_pair, pairs)
-            hash_iter = tqdm(
-                hash_iter,
-                total=len(pairs),
-                desc="Filtering matched hashes",
-                unit="row",
-            )
-            hashes_list = list(hash_iter)
-    else:
-        hashes_list = []
-        for p in tqdm(pairs, desc="Filtering matched hashes", unit="row", total=len(pairs)):
-            hashes_list.append(_hash_pair(p))
-
-    for (src_row, dest_row, col_map, config, partition), (src_hash, dest_hash) in zip(pairs, hashes_list):
-        use_row_hash = config.get("comparison", {}).get("use_row_hash", False)
-        pair_hashes: Tuple[str, str] | None = None
-        if use_row_hash:
-            if src_hash == dest_hash:
-                continue
-            pk_field = config.get("primary_key")
-            pk_val = src_row.get(pk_field)
-            if mismatch_count % 1000 == 0:
-                debug_log(
-                    f"Hash mismatch for row {pk_val}: src_hash={src_hash}, dest_hash={dest_hash}; src={src_row}, dest={dest_row}",
-                    config,
-                    level="high",
-                )
-            pair_hashes = (src_hash, dest_hash)
-            mismatch_count += 1
-        columns = list(col_map.keys())
-        only_cols = config.get("comparison", {}).get("only_columns")
-        if only_cols:
-            columns = [c for c in columns if c in only_cols]
-        tasks.append((src_row, dest_row, columns, config, pair_hashes, partition))
-
-    if not tasks:
-        debug_log("All rows skipped after hash match filtering", cfg_ref)
-        return
-
-    original_total = len(tasks)
-    if progress is not None:
-        progress.total = original_total
+    if progress is not None and total is not None:
+        progress.total = total
         progress.refresh()
 
-    debug_log("Phase 2: comparing mismatching rows", cfg_ref, level="low")
+    def _prepare(item: tuple) -> tuple:
+        if len(item) == 4:
+            src_row, dest_row, col_map, config = item
+            part = None
+        else:
+            src_row, dest_row, col_map, config, part = item
+        return src_row, dest_row, col_map, config, part
 
-    # ------------------------------------------------------------------
-    # Phase 2 - compare the mismatching pairs, optionally in parallel.
-    # ------------------------------------------------------------------
     if parallel:
-        task_map = {i: t for i, t in enumerate(tasks)}
         with ThreadPoolExecutor(max_workers=workers) as executor:
-            futures = {
-                executor.submit(
-                    compare_row_pair_by_pk,
-                    src,
-                    dest,
-                    cols,
-                    cfg,
-                    hashes=hashes,
-                    partition=part,
-                ): i
-                for i, (src, dest, cols, cfg, hashes, part) in task_map.items()
-            }
-            for future in as_completed(futures):
-                idx = futures[future]
-                result = future.result()
-                task_map.pop(idx, None)
+            futures: set = set()
+            count = 0
+            for item in row_pairs:
+                src_row, dest_row, col_map, config, part = _prepare(item)
+                cfg_ref = cfg_ref or config
+                cols = list(col_map.keys())
+                only_cols = config.get("comparison", {}).get("only_columns")
+                if only_cols:
+                    cols = [c for c in cols if c in only_cols]
+                futures.add(
+                    executor.submit(
+                        compare_row_pair_by_pk,
+                        src_row,
+                        dest_row,
+                        cols,
+                        config,
+                        partition=part,
+                    )
+                )
+                count += 1
+                if progress is not None and total is None:
+                    progress.total = count
+                    progress.refresh()
+                while len(futures) >= workers:
+                    done, futures = wait(futures, return_when=FIRST_COMPLETED)
+                    for fut in done:
+                        result = fut.result()
+                        if progress is not None:
+                            if hasattr(progress, "update"):
+                                progress.update(1)
+                            else:
+                                progress.n += 1
+                                progress.refresh()
+                        if result:
+                            yield result
+
+            for fut in as_completed(futures):
+                result = fut.result()
                 if progress is not None:
                     if hasattr(progress, "update"):
                         progress.update(1)
@@ -348,16 +321,22 @@ def compare_row_pairs(
                 if result:
                     yield result
     else:
-        while tasks:
-            src, dest, cols, cfg, hashes, part = tasks.pop(0)
+        count = 0
+        for item in row_pairs:
+            src_row, dest_row, col_map, config, part = _prepare(item)
+            cfg_ref = cfg_ref or config
+            cols = list(col_map.keys())
+            only_cols = config.get("comparison", {}).get("only_columns")
+            if only_cols:
+                cols = [c for c in cols if c in only_cols]
             result = compare_row_pair_by_pk(
-                src,
-                dest,
+                src_row,
+                dest_row,
                 cols,
-                cfg,
-                hashes=hashes,
+                config,
                 partition=part,
             )
+            count += 1
             if progress is not None:
                 if hasattr(progress, "update"):
                     progress.update(1)
@@ -366,3 +345,7 @@ def compare_row_pairs(
                     progress.refresh()
             if result:
                 yield result
+
+        if progress is not None and progress.total is None:
+            progress.total = count
+            progress.refresh()
