@@ -30,6 +30,11 @@ def main():
         type=int,
         help="maximum number of rows to fetch per table",
     )
+    parser.add_argument(
+        "--output-mismatches",
+        action="store_true",
+        help="print discrepancy records to stdout",
+    )
     args = parser.parse_args()
 
     config = load_config()
@@ -37,6 +42,8 @@ def main():
         config["debug"] = args.debug
     if args.limit:
         config["limit"] = args.limit
+    if args.output_mismatches:
+        config["output_mismatches"] = True
 
     debug_log("Starting reconciliation run", config, level="low")
 
@@ -63,6 +70,11 @@ def main():
 
     try:
         with get_oracle_connection(src_env, config) as src_conn, get_sqlserver_connection(dest_env, config) as dest_conn, DiscrepancyWriter(dest_conn, output_schema, output_table) as writer:
+
+            def write_record(record: dict) -> None:
+                writer.write(record)
+                if config.get("output_mismatches"):
+                    print(record)
 
             def generate_pairs():
                 for partition in get_partitions(config):
@@ -135,7 +147,7 @@ def main():
                                 src_row = next(src_iter, None)
                                 dest_row = next(dest_iter, None)
                             elif dest_row is None or (src_row and src_key < dest_key):
-                                writer.write({
+                                write_record({
                                     "primary_key": src_key,
                                     "type": "missing_in_dest",
                                     "column": None,
@@ -147,7 +159,7 @@ def main():
                                 })
                                 src_row = next(src_iter, None)
                             else:
-                                writer.write({
+                                write_record({
                                     "primary_key": dest_key,
                                     "type": "extra_in_dest",
                                     "column": None,
@@ -176,7 +188,7 @@ def main():
                             sample.append((src_key, result["mismatches"][0]))
                             seen_pks.add(src_key)
                         for diff in result["mismatches"]:
-                            writer.write({
+                            write_record({
                                 "primary_key": src_key,
                                 "type": "mismatch",
                                 "column": diff["column"],
