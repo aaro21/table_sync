@@ -52,6 +52,7 @@ class DiscrepancyWriter:
             debug_log("Flush called but buffer is empty.", {}, level="low")
             return
         cursor = self.conn.cursor()
+        cursor.fast_executemany = True
         full_table = self._full_table()
         placeholders = ", ".join("?" for _ in self.columns)
         insert_sql = (
