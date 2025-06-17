@@ -259,6 +259,8 @@ def compare_row_pairs(
 
     if not pairs:
         return
+
+    debug_log("Phase 1: hashing row pairs", cfg_ref, level="low")
     if parallel:
         with ThreadPoolExecutor(max_workers=workers) as executor:
             hash_iter = executor.map(_hash_pair, pairs)
@@ -280,6 +282,13 @@ def compare_row_pairs(
         if use_row_hash:
             if src_hash == dest_hash:
                 continue
+            pk_field = config.get("primary_key")
+            pk_val = src_row.get(pk_field)
+            debug_log(
+                f"Hash mismatch for row {pk_val}: src_hash={src_hash}, dest_hash={dest_hash}; src={src_row}, dest={dest_row}",
+                config,
+                level="high",
+            )
             pair_hashes = (src_hash, dest_hash)
         columns = list(col_map.keys())
         only_cols = config.get("comparison", {}).get("only_columns")
@@ -295,6 +304,8 @@ def compare_row_pairs(
     if progress is not None:
         progress.total = original_total
         progress.refresh()
+
+    debug_log("Phase 2: comparing mismatching rows", cfg_ref, level="low")
 
     # ------------------------------------------------------------------
     # Phase 2 - compare the mismatching pairs, optionally in parallel.

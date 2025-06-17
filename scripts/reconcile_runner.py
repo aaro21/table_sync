@@ -32,6 +32,8 @@ def main():
     if args.debug:
         config["debug"] = args.debug
 
+    debug_log("Starting reconciliation run", config, level="low")
+
     src_env = config["source"]["resolved_env"]
     dest_env = config["destination"]["resolved_env"]
     src_schema = config["source"].get("schema", "")
@@ -196,6 +198,8 @@ def main():
                     config,
                     level="medium",
                 )
+
+            debug_log("Reconciliation complete", config, level="low")
 
     except Exception as exc:  # pragma: no cover - runtime failure
         debug_log(f"Reconciliation failed: {exc}", config, level="low")
