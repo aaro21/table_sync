@@ -281,7 +281,7 @@ def compare_row_pairs_serial(
         only_cols = config.get("comparison", {}).get("only_columns")
         if only_cols:
             cols = [c for c in cols if c in only_cols]
-        src_hashes, dest_hashes = compute_row_hashes_parallel([src_row, dest_row], workers=2, mode="process")
+        src_hashes, dest_hashes = compute_row_hashes_parallel([src_row, dest_row], workers=2, mode="thread")
         src_hash, dest_hash = src_hashes[0], dest_hashes[1]
         result = compare_row_pair_by_pk(
             src_row,
@@ -353,7 +353,7 @@ def compare_row_pairs_parallel_detailed(
             only_cols = config.get("comparison", {}).get("only_columns")
             if only_cols:
                 cols = [c for c in cols if c in only_cols]
-            src_hashes, dest_hashes = compute_row_hashes_parallel([src_row, dest_row], workers=2, mode="process")
+            src_hashes, dest_hashes = compute_row_hashes_parallel([src_row, dest_row], workers=2, mode="thread")
             src_hash, dest_hash = src_hashes[0], dest_hashes[1]
             tasks.append(
                 executor.submit(
