@@ -114,44 +114,48 @@ def main():
                 dest_row = next(dest_iter, None)
 
                 row_pairs = []
+                total_rows = max(len(src_rows), len(dest_rows))
 
-            while src_row is not None or dest_row is not None:
-                if src_row is not None:
-                    assert primary_key in src_row, f"Primary key '{primary_key}' missing in source row: {src_row}"
-                if dest_row is not None:
-                    assert primary_key in dest_row, f"Primary key '{primary_key}' missing in destination row: {dest_row}"
+                with tqdm(total=total_rows, desc="processing rows", unit="row") as progress:
+                    while src_row is not None or dest_row is not None:
+                        if src_row is not None:
+                            assert primary_key in src_row, f"Primary key '{primary_key}' missing in source row: {src_row}"
+                        if dest_row is not None:
+                            assert primary_key in dest_row, f"Primary key '{primary_key}' missing in destination row: {dest_row}"
 
-                src_key = src_row[primary_key] if src_row else None
-                dest_key = dest_row[primary_key] if dest_row else None
+                        src_key = src_row[primary_key] if src_row else None
+                        dest_key = dest_row[primary_key] if dest_row else None
 
-                if src_row and dest_row and src_key == dest_key:
-                    row_pairs.append((src_row, dest_row, src_cols, config))
-                    src_row = next(src_iter, None)
-                    dest_row = next(dest_iter, None)
-                elif dest_row is None or (src_row and src_key < dest_key):
-                    writer.write({
-                        "primary_key": src_key,
-                        "type": "missing_in_dest",
-                        "column": None,
-                        "source_value": src_row,
-                        "dest_value": None,
-                        "year": partition["year"],
-                        "month": partition["month"],
-                        "week": partition.get("week"),
-                    })
-                    src_row = next(src_iter, None)
-                else:
-                    writer.write({
-                        "primary_key": dest_key,
-                        "type": "extra_in_dest",
-                        "column": None,
-                        "source_value": None,
-                        "dest_value": dest_row,
-                        "year": partition["year"],
-                        "month": partition["month"],
-                        "week": partition.get("week"),
-                    })
-                    dest_row = next(dest_iter, None)
+                        if src_row and dest_row and src_key == dest_key:
+                            row_pairs.append((src_row, dest_row, src_cols, config))
+                            src_row = next(src_iter, None)
+                            dest_row = next(dest_iter, None)
+                        elif dest_row is None or (src_row and src_key < dest_key):
+                            writer.write({
+                                "primary_key": src_key,
+                                "type": "missing_in_dest",
+                                "column": None,
+                                "source_value": src_row,
+                                "dest_value": None,
+                                "year": partition["year"],
+                                "month": partition["month"],
+                                "week": partition.get("week"),
+                            })
+                            src_row = next(src_iter, None)
+                        else:
+                            writer.write({
+                                "primary_key": dest_key,
+                                "type": "extra_in_dest",
+                                "column": None,
+                                "source_value": None,
+                                "dest_value": dest_row,
+                                "year": partition["year"],
+                                "month": partition["month"],
+                                "week": partition.get("week"),
+                            })
+                            dest_row = next(dest_iter, None)
+
+                        progress.update(1)
 
                 if row_pairs:
                     sample: list[tuple[Any, dict]] = []
