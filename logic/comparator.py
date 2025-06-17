@@ -7,7 +7,7 @@ from datetime import datetime
 
 from typing import Any, Iterable, Optional, Tuple, List
 import hashlib
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
 
 from dateutil import parser
 
@@ -273,12 +273,9 @@ def compare_row_pairs(
         return src_row, dest_row, col_map, config, part
 
     if parallel:
-        # Submit all comparisons to the executor immediately so that progress
-        # updates while futures complete. This still requires materialising the
-        # inputs but avoids the two phase hash filtering step which previously
-        # deferred progress updates until the end.
-        tasks = []
         with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures: set = set()
+            count = 0
             for item in row_pairs:
                 src_row, dest_row, col_map, config, part = _prepare(item)
                 cfg_ref = cfg_ref or config
@@ -286,7 +283,7 @@ def compare_row_pairs(
                 only_cols = config.get("comparison", {}).get("only_columns")
                 if only_cols:
                     cols = [c for c in cols if c in only_cols]
-                tasks.append(
+                futures.add(
                     executor.submit(
                         compare_row_pair_by_pk,
                         src_row,
@@ -296,12 +293,24 @@ def compare_row_pairs(
                         partition=part,
                     )
                 )
+                count += 1
+                if progress is not None and total is None:
+                    progress.total = count
+                    progress.refresh()
+                while len(futures) >= workers:
+                    done, futures = wait(futures, return_when=FIRST_COMPLETED)
+                    for fut in done:
+                        result = fut.result()
+                        if progress is not None:
+                            if hasattr(progress, "update"):
+                                progress.update(1)
+                            else:
+                                progress.n += 1
+                                progress.refresh()
+                        if result:
+                            yield result
 
-            if progress is not None and total is None:
-                progress.total = len(tasks)
-                progress.refresh()
-
-            for fut in as_completed(tasks):
+            for fut in as_completed(futures):
                 result = fut.result()
                 if progress is not None:
                     if hasattr(progress, "update"):

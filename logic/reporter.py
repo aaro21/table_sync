@@ -54,8 +54,8 @@ class DiscrepancyWriter:
             f"INSERT INTO {full_table} ({', '.join('[' + c + ']' for c in self.columns)}) "
             f"VALUES ({placeholders})"
         )
-        values = [[rec.get(c) for c in self.columns] for rec in self.buffer]
-        cursor.executemany(insert_sql, values)
+        for rec in self.buffer:
+            cursor.execute(insert_sql, [rec.get(c) for c in self.columns])
         self.conn.commit()
         self.buffer.clear()
 
