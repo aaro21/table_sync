@@ -183,7 +183,6 @@ def compare_row_pair_by_pk(
         result = {"primary_key": pk, "mismatches": mismatches}
         if partition is not None:
             result["partition"] = partition
-        debug_log(f"Row {pk} mismatch detail: {mismatches}", config, level="high")
         return result
     return None
 
@@ -269,56 +268,71 @@ def compare_row_pairs_serial(
     yielded immediately.
     """
 
-    cfg_ref: Optional[dict] = None
+    # Collect all rows for batch comparison
+    src_rows, dest_rows, partitions = [], [], []
+    col_maps, configs = [], []
 
-    count = 0
     for item in row_pairs:
         if len(item) == 4:
             src_row, dest_row, col_map, config = item
             part = None
         else:
             src_row, dest_row, col_map, config, part = item
-        cfg_ref = cfg_ref or config
-        cols = list(col_map.keys())
-        only_cols = config.get("comparison", {}).get("only_columns")
-        if only_cols:
-            cols = [c for c in cols if c in only_cols]
+        src_rows.append(src_row)
+        dest_rows.append(dest_row)
+        col_maps.append(col_map)
+        configs.append(config)
+        partitions.append(part)
 
-        debug_log(f"Processing PK={src_row.get(config.get('primary_key'))} with raw source: {src_row} and raw dest: {dest_row}", config, level="high")
+    if not src_rows or not dest_rows:
+        return
 
-        src_hash = compute_row_hash(src_row)
-        dest_hash = compute_row_hash(dest_row)
+    columns = list(col_maps[0].keys())
+    df_src = pd.DataFrame(src_rows)[columns]
+    df_dest = pd.DataFrame(dest_rows)[columns]
 
-        debug_log(f"Computed hashes - source: {src_hash}, dest: {dest_hash}", config, level="high")
+    # Sanitize using vectorized logic
+    df_src = df_src.applymap(sanitize)
+    df_dest = df_dest.applymap(sanitize)
 
-        result = compare_row_pair_by_pk(
-            src_row,
-            dest_row,
-            cols,
-            config,
-            partition=part,
-            hashes=(src_hash, dest_hash),
-        )
+    from concurrent.futures import ThreadPoolExecutor
 
-        count += 1
-        if progress is not None:
-            if hasattr(progress, "update"):
-                progress.update(1)
-            else:
-                progress.n += 1
-                progress.refresh()
+    mismatches = []
 
-        if result:
-            debug_log(
-                f"Yielding mismatch result for PK={result.get('primary_key')}: {result}",
-                config,
-                level="high",
-            )
-            yield result
+    def compare_column(col):
+        results = []
+        src_col = df_src[col].to_numpy()
+        dest_col = df_dest[col].to_numpy()
+        equal_mask = src_col == dest_col
 
-    if progress is not None and getattr(progress, "total", None) is None:
-        progress.total = count
-        progress.refresh()
+        for idx, match in enumerate(equal_mask):
+            if match:
+                continue
+            if not configs[idx].get("comparison", {}).get("include_nulls", False):
+                if pd.isnull(src_col[idx]) or pd.isnull(dest_col[idx]):
+                    continue
+            mismatch = {
+                "primary_key": src_rows[idx].get(configs[idx].get("columns", {}).get("primary_key", configs[idx].get("primary_key"))),
+                "column": col,
+                "source_value": src_col[idx],
+                "dest_value": dest_col[idx],
+            }
+            if partitions[idx] is not None:
+                mismatch["partition"] = partitions[idx]
+            results.append(mismatch)
+        return results
+
+    with ThreadPoolExecutor() as executor:
+        future_to_col = {executor.submit(compare_column, col): col for col in columns}
+        for future in future_to_col:
+            results = future.result()
+            mismatches.extend(results)
+            if progress is not None:
+                progress.update(len(results))
+
+    for result in mismatches:
+        debug_log(f"Yielding mismatch result for PK={result.get('primary_key')}: {result}", configs[0], level="high")
+        yield result
 
 
 def compare_row_pairs_parallel_detailed(
@@ -367,11 +381,8 @@ def compare_row_pairs_parallel_detailed(
             only_cols = config.get("comparison", {}).get("only_columns")
             if only_cols:
                 cols = [c for c in cols if c in only_cols]
-            hashes = compute_row_hashes_parallel([src_row, dest_row], workers=2, mode="thread")
-            if len(hashes) != 2:
-                debug_log(f"Unexpected hash length: {len(hashes)} for row pair {src_row} / {dest_row}", config, level="low")
-                continue
-            src_hash, dest_hash = hashes
+            src_hashes, dest_hashes = compute_row_hashes_parallel([src_row, dest_row], workers=2, mode="thread")
+            src_hash, dest_hash = src_hashes[0], dest_hashes[1]
             tasks.append(
                 executor.submit(
                     compare_row_pair_by_pk,
@@ -383,8 +394,6 @@ def compare_row_pairs_parallel_detailed(
                     hashes=(src_hash, dest_hash),
                 )
             )
-
-        debug_log(f"Processing {len(tasks)} row pairs in parallel", cfg_ref, level="medium")
 
         if progress is not None and total is None:
             progress.total = len(tasks)
@@ -402,138 +411,79 @@ def compare_row_pairs_parallel_detailed(
                 yield result
 
 
+def filter_mismatched_row_pairs_in_chunks(
+    row_pairs: list[tuple],
+    *,
+    workers: int = 4,
+    chunk_size: int = 100_000,
+    progress=None,
+) -> list[tuple]:
+    """Split row_pairs into chunks, compare hashes in parallel, and return only mismatched row pairs."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def process_chunk(chunk: list[tuple]) -> list[tuple]:
+        mismatches = []
+        for item in chunk:
+            if len(item) == 4:
+                src_row, dest_row, col_map, config = item
+                part = None
+            else:
+                src_row, dest_row, col_map, config, part = item
+
+            cfg = config.get("comparison", {})
+            use_row_hash = cfg.get("use_row_hash", False)
+            if not use_row_hash:
+                mismatches.append(item)
+                continue
+
+            src_hash = compute_row_hash(src_row)
+            dest_hash = compute_row_hash(dest_row)
+            if src_hash != dest_hash:
+                mismatches.append(item)
+        return mismatches
+
+    chunks = [row_pairs[i:i + chunk_size] for i in range(0, len(row_pairs), chunk_size)]
+    filtered: list[tuple] = []
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = [executor.submit(process_chunk, chunk) for chunk in chunks]
+        for fut in futures:
+            chunk_result = fut.result()
+            filtered.extend(chunk_result)
+            if progress is not None:
+                if hasattr(progress, "update"):
+                    progress.update(len(chunk_result))
+                else:
+                    progress.n += len(chunk_result)
+                    progress.refresh()
+
+    return filtered
+
+
 def compare_row_pairs(
     row_pairs: Iterable[tuple],
     *,
     workers: int = 4,
     progress=None,
 ) -> Iterable[dict]:
+    row_pairs = list(row_pairs)
     config = None
     for item in row_pairs:
         if len(item) >= 4:
             config = item[3]
             break
 
-    use_parallel = config.get("comparison", {}).get("parallel", False) if config else False
-    parallel_mode = config.get("comparison", {}).get("parallel_mode", "thread") if config else "thread"
-    use_two_phase = config.get("comparison", {}).get("two_phase", False) if config else False
-
-    debug_log(f"Dispatching comparison with use_parallel={use_parallel}, mode={parallel_mode}, two_phase={use_two_phase}", config, level="medium")
+    comparison_cfg = config.get("comparison", {}) if config else {}
+    use_parallel = comparison_cfg.get("parallel", False)
+    parallel_mode = comparison_cfg.get("parallel_mode", "thread")
+    use_two_phase = comparison_cfg.get("two_phase", False)
 
     if use_two_phase:
-        return compare_row_pairs_in_two_phases(row_pairs, workers=workers, progress=progress)
+        debug_log("Two-phase comparison enabled: filtering mismatched rows via hash", config)
+        filtered = filter_mismatched_row_pairs_in_chunks(row_pairs, workers=workers, progress=progress)
+        debug_log(f"Filtered down to {len(filtered)} mismatched row pairs", config)
+        row_pairs = filtered
 
     if use_parallel:
-        if parallel_mode == "batch":
-            return compare_row_pairs_serial_parallel_batches(row_pairs, workers=workers, progress=progress)
         return compare_row_pairs_parallel_detailed(row_pairs, workers=workers, progress=progress)
-    yield from compare_row_pairs_serial(row_pairs, progress=progress)
-
-
-# Two-phase comparison: hash filter then detailed compare
-def compare_row_pairs_in_two_phases(
-    row_pairs: Iterable[tuple],
-    *,
-    workers: int = 4,
-    progress=None,
-) -> Iterable[dict]:
-    """Two-phase comparison: first filter using hash mismatch, then compare details."""
-    from concurrent.futures import ThreadPoolExecutor
-
-    row_pairs = list(row_pairs)
-    if not row_pairs:
-        return
-
-    config = None
-    for item in row_pairs:
-        if len(item) >= 4:
-            config = item[3]
-            break
-
-    debug_log(f"Phase 1: Filtering row pairs using hashes", config, level="medium")
-
-    def is_mismatch(pair):
-        if len(pair) == 4:
-            src_row, dest_row, col_map, cfg = pair
-            part = None
-        else:
-            src_row, dest_row, col_map, cfg, part = pair
-        src_hash, dest_hash = compute_row_hash(src_row), compute_row_hash(dest_row)
-        return (src_hash != dest_hash, (src_row, dest_row, col_map, cfg, part if part else None))
-
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        filtered = list(executor.map(is_mismatch, row_pairs))
-
-    mismatched = [row for matched, row in filtered if matched]
-
-    debug_log(f"Phase 1 complete: {len(mismatched)} mismatched row pairs out of {len(row_pairs)}", config, level="medium")
-
-    debug_log(f"Phase 2: Running detailed comparison on mismatches", config, level="medium")
-    yield from compare_row_pairs_serial(mismatched, progress=progress)
-
-
-# New function for batch parallelization
-def compare_row_pairs_serial_parallel_batches(
-    row_pairs: Iterable[tuple],
-    *,
-    workers: int = 4,
-    progress=None,
-) -> Iterable[dict]:
-    """Split row_pairs into batches and compare each batch in parallel using threads."""
-    from concurrent.futures import ThreadPoolExecutor
-
-    row_pairs = list(row_pairs)
-    if not row_pairs:
-        return
-
-    config = None
-    for item in row_pairs:
-        if len(item) >= 4:
-            config = item[3]
-            break
-
-    chunk_size = max(1, len(row_pairs) // workers)
-
-    def process_chunk(chunk):
-        debug_log(
-            f"Processing chunk with {len(chunk)} row pairs",
-            config,
-            level="medium",
-        )
-        results = list(compare_row_pairs_serial(chunk, progress=None))
-        debug_log(
-            f"Found {len(results)} mismatches in chunk",
-            config,
-            level="medium",
-        )
-        debug_log(
-            f"Processed chunk of {len(chunk)} rows - mismatches found: {len(results)}",
-            config,
-            level="medium",
-        )
-        return results
-
-    results: list[dict] = []
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        futures = [
-            executor.submit(process_chunk, row_pairs[i:i + chunk_size])
-            for i in range(0, len(row_pairs), chunk_size)
-        ]
-        for fut in futures:
-            batch_result = fut.result()
-            results.extend(batch_result)
-            if progress:
-                if hasattr(progress, "update"):
-                    progress.update(len(batch_result))
-                else:
-                    progress.n += len(batch_result)
-                    progress.refresh()
-
-    debug_log(
-        f"Yielding {len(results)} total mismatches from all batches",
-        config,
-        level="medium",
-    )
-
-    for r in results:
-        yield r
+    return compare_row_pairs_serial(row_pairs, progress=progress)
