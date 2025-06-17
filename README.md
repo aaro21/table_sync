@@ -54,6 +54,13 @@ connectivity issues:
 python scripts/reconcile_runner.py --output-mismatches
 ```
 
+When debugging specific issues you can process a single row by supplying its
+primary key value using the `--record` option:
+
+```bash
+python scripts/reconcile_runner.py --record 12345
+```
+
 This repository is intentionally minimal and focuses only on the core
 logic for comparing tables. Many features are missing, including retry
 logic, logging and tests.

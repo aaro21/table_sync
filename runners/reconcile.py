@@ -19,6 +19,7 @@ def fetch_rows(
     week_column: Optional[str] = None,
     config: Optional[dict] = None,
     limit: Optional[int] = None,
+    pk_value: Optional[str] = None,
 ) -> Iterable[Dict]:
     """Yield rows filtered by partition in primary key order.
 
@@ -28,6 +29,9 @@ def fetch_rows(
         Optional maximum number of rows returned. ``None`` means no limit.
         When provided, the value is applied directly in the SQL query using
         ``FETCH FIRST``/``OFFSET`` syntax depending on the dialect.
+    pk_value:
+        When provided, restrict results to only the row matching this primary
+        key value.
     """
     # Cast partition identifiers to strings so that filtering works for
     # both numeric and varchar column types. This avoids implicit type
@@ -54,6 +58,10 @@ def fetch_rows(
             query += f" AND {week_column} = :3"
             params.append(week)
             param_idx = 4
+        if pk_value is not None:
+            query += f" AND {columns[primary_key]} = :{param_idx}"
+            params.append(str(pk_value))
+            param_idx += 1
         query += f" ORDER BY {columns[primary_key]}"
         if limit is not None:
             query += f" FETCH FIRST :{param_idx} ROWS ONLY"
@@ -68,6 +76,9 @@ def fetch_rows(
         if "week" in partition and week_column:
             query += f" AND {week_column} = ?"
             params.append(week)
+        if pk_value is not None:
+            query += f" AND {columns[primary_key]} = ?"
+            params.append(str(pk_value))
         query += f" ORDER BY {columns[primary_key]}"
         if limit is not None:
             query += " OFFSET 0 ROWS FETCH NEXT ? ROWS ONLY"

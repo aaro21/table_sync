@@ -99,3 +99,44 @@ def test_fetch_rows_limit():
     )
     assert len(result) == 2
     assert conn.cursor_obj.executed == ("2021", "1", 2)
+
+
+def test_fetch_rows_pk_value():
+    conn = DummyConn()
+    columns = {"id": "id", "year": "yr", "month": "mon"}
+    partition = {"year": 2021, "month": 1}
+    list(
+        fetch_rows(
+            conn,
+            "dbo",
+            "t",
+            columns,
+            partition,
+            "id",
+            "yr",
+            "mon",
+            pk_value="42",
+        )
+    )
+    assert conn.cursor_obj.executed == ("2021", "1", "42")
+
+
+def test_fetch_rows_pk_value_oracle():
+    conn = DummyConn()
+    columns = {"id": "id", "year": "yr", "month": "mon"}
+    partition = {"year": 2021, "month": 1}
+    list(
+        fetch_rows(
+            conn,
+            "dbo",
+            "t",
+            columns,
+            partition,
+            "id",
+            "yr",
+            "mon",
+            dialect="oracle",
+            pk_value="99",
+        )
+    )
+    assert conn.cursor_obj.executed == ("2021", "1", "99")

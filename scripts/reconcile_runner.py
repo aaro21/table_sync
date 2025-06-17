@@ -35,6 +35,10 @@ def main():
         action="store_true",
         help="print discrepancy records to stdout",
     )
+    parser.add_argument(
+        "--record",
+        help="process only the record with this primary key value",
+    )
     args = parser.parse_args()
 
     config = load_config()
@@ -44,6 +48,8 @@ def main():
         config["limit"] = args.limit
     if args.output_mismatches:
         config["output_mismatches"] = True
+    if args.record:
+        config["record_pk"] = args.record
 
     debug_log("Starting reconciliation run", config, level="low")
 
@@ -98,6 +104,7 @@ def main():
                             week_column=week_column,
                             config=config,
                             limit=config.get("limit"),
+                            pk_value=config.get("record_pk"),
                         )
                     )
 
@@ -115,6 +122,7 @@ def main():
                             week_column=week_column,
                             config=config,
                             limit=config.get("limit"),
+                            pk_value=config.get("record_pk"),
                         )
                     )
 
