@@ -362,8 +362,11 @@ def compare_row_pairs_parallel_detailed(
             only_cols = config.get("comparison", {}).get("only_columns")
             if only_cols:
                 cols = [c for c in cols if c in only_cols]
-            src_hashes, dest_hashes = compute_row_hashes_parallel([src_row, dest_row], workers=2, mode="thread")
-            src_hash, dest_hash = src_hashes[0], dest_hashes[1]
+            hashes = compute_row_hashes_parallel([src_row, dest_row], workers=2, mode="thread")
+            if len(hashes) != 2:
+                debug_log(f"Unexpected hash length: {len(hashes)} for row pair {src_row} / {dest_row}", config, level="low")
+                continue
+            src_hash, dest_hash = hashes
             tasks.append(
                 executor.submit(
                     compare_row_pair_by_pk,
@@ -375,6 +378,8 @@ def compare_row_pairs_parallel_detailed(
                     hashes=(src_hash, dest_hash),
                 )
             )
+
+        debug_log(f"Processing {len(tasks)} row pairs in parallel", cfg_ref, level="medium")
 
         if progress is not None and total is None:
             progress.total = len(tasks)
@@ -406,6 +411,8 @@ def compare_row_pairs(
 
     use_parallel = config.get("comparison", {}).get("parallel", False) if config else False
     parallel_mode = config.get("comparison", {}).get("parallel_mode", "thread") if config else "thread"
+
+    debug_log(f"Dispatching comparison with use_parallel={use_parallel}, mode={parallel_mode}", config, level="medium")
 
     if use_parallel:
         if parallel_mode == "batch":
