@@ -291,8 +291,11 @@ def compare_row_pairs(
                 result = future.result()
                 task_map.pop(idx, None)
                 if progress is not None:
-                    progress.n = original_total - len(task_map)
-                    progress.refresh()
+                    if hasattr(progress, "update"):
+                        progress.update(1)
+                    else:
+                        progress.n += 1
+                        progress.refresh()
                 if result:
                     yield result
     else:
@@ -307,7 +310,10 @@ def compare_row_pairs(
                 partition=part,
             )
             if progress is not None:
-                progress.n = original_total - len(tasks)
-                progress.refresh()
+                if hasattr(progress, "update"):
+                    progress.update(1)
+                else:
+                    progress.n += 1
+                    progress.refresh()
             if result:
                 yield result
