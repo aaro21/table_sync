@@ -331,8 +331,10 @@ def compare_row_pairs_serial(
                 progress.update(len(results))
 
     for result in mismatches:
-        debug_log(f"Yielding mismatch result for PK={result.get('primary_key')}: {result}", configs[0], level="high")
-        yield result
+        # Only log if debug level is high, but always yield
+        if configs[0].get("debug", {}).get("level", "low") == "high":
+            debug_log(f"Yielding mismatch result for PK={result.get('primary_key')}: {result}", configs[0], level="high")
+        yield result  # Always yield regardless of debug level
 
 
 def compare_row_pairs_parallel_detailed(
@@ -407,6 +409,8 @@ def compare_row_pairs_parallel_detailed(
                 else:
                     progress.n += 1
                     progress.refresh()
+            if result and cfg_ref and cfg_ref.get("debug", {}).get("level", "high") == "high":
+                debug_log(f"Yielding parallel mismatch result for PK={result.get('primary_key')}: {result}", cfg_ref, level="high")
             if result:
                 yield result
 
