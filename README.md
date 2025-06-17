@@ -16,8 +16,9 @@ written to a table on the destination SQL Server.
   comparing rows and writing reports.
 - `runners/` provides lower level functions invoked by the command line
   scripts.
-- `scripts/` contains runnable modules for reconciliation and (future)
-  repair tasks.
+- `scripts/` contains runnable modules for reconciliation and applying
+  fixes for mismatched rows.
+- `tests/` holds unit tests covering the core logic.
 
 ## Usage
 
@@ -61,7 +62,21 @@ primary key value using the `--record` option:
 python scripts/reconcile_runner.py --record 12345
 ```
 
-This repository is intentionally minimal and focuses only on the core
-logic for comparing tables. Many features are missing, including retry
-logic, logging and tests.
+Row comparison can optionally use a row hash to skip columns when the
+source and destination rows are identical. Parallel comparison across
+partitions is also supported when enabled in the YAML config.
+
+After reconciliation, mismatches can be applied back to the destination
+table using:
+
+```bash
+python scripts/fix_mismatches.py --apply
+```
+This script updates only the differing columns and accepts a `--no-dry-run`
+flag when you want to preview the SQL statements.
+
+This repository remains intentionally small but now includes simple
+logging via `utils.logger`, tqdm progress bars and a suite of unit tests.
+Retry logic and advanced error handling are still out of scope to keep
+the example focused on reconciliation.
 
