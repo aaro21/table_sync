@@ -8,7 +8,7 @@ from connectors.oracle_connector import get_oracle_connection
 from connectors.sqlserver_connector import get_sqlserver_connection
 from logic.partitioner import get_partitions
 from runners.reconcile import fetch_rows
-from logic.comparator import compare_rows, compare_row_pair, compare_row_pairs
+from logic.comparator import compare_row_pairs
 from logic.reporter import DiscrepancyWriter
 from utils.logger import debug_log
 from concurrent.futures import ThreadPoolExecutor
@@ -16,6 +16,8 @@ from tqdm import tqdm
 
 
 def main():
+    """Run the reconciliation process based on ``config/config.yaml``."""
+
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--debug",
@@ -51,67 +53,67 @@ def main():
     use_row_hash = config.get("comparison", {}).get("use_row_hash", False)
     use_parallel = config.get("comparison", {}).get("parallel", False)
 
-    with get_oracle_connection(src_env, config) as src_conn, get_sqlserver_connection(dest_env, config) as dest_conn:
-        writer = DiscrepancyWriter(dest_conn, output_schema, output_table)
+    try:
+        with get_oracle_connection(src_env, config) as src_conn, get_sqlserver_connection(dest_env, config) as dest_conn, DiscrepancyWriter(dest_conn, output_schema, output_table) as writer:
 
-        for partition in get_partitions(config):
-            debug_log(
-                f"Partition: {partition}",
-                config,
-                level="low",
-            )
+            for partition in get_partitions(config):
+                debug_log(
+                    f"Partition: {partition}",
+                    config,
+                    level="low",
+                )
 
-            with ThreadPoolExecutor(max_workers=2) as executor:
-                src_future = executor.submit(
-                    lambda: list(
-                        fetch_rows(
-                            src_conn,
-                            src_schema,
-                            src_table,
-                            src_cols,
-                            partition,
-                            primary_key,
-                            year_column,
-                            month_column,
-                            dialect=src_dialect,
-                            week_column=week_column,
-                            config=config,
+                with ThreadPoolExecutor(max_workers=2) as executor:
+                    src_future = executor.submit(
+                        lambda: list(
+                            fetch_rows(
+                                src_conn,
+                                src_schema,
+                                src_table,
+                                src_cols,
+                                partition,
+                                primary_key,
+                                year_column,
+                                month_column,
+                                dialect=src_dialect,
+                                week_column=week_column,
+                                config=config,
+                            )
                         )
                     )
-                )
-                dest_future = executor.submit(
-                    lambda: list(
-                        fetch_rows(
-                            dest_conn,
-                            dest_schema,
-                            dest_table,
-                            dest_cols,
-                            partition,
-                            primary_key,
-                            year_column,
-                            month_column,
-                            dialect=dest_dialect,
-                            week_column=week_column,
-                            config=config,
+                    dest_future = executor.submit(
+                        lambda: list(
+                            fetch_rows(
+                                dest_conn,
+                                dest_schema,
+                                dest_table,
+                                dest_cols,
+                                partition,
+                                primary_key,
+                                year_column,
+                                month_column,
+                                dialect=dest_dialect,
+                                week_column=week_column,
+                                config=config,
+                            )
                         )
                     )
+                    src_rows = src_future.result()
+                    dest_rows = dest_future.result()
+
+                debug_log(
+                    f"Fetched {len(src_rows)} source rows and {len(dest_rows)} destination rows",
+                    config,
+                    level="medium",
                 )
-                src_rows = src_future.result()
-                dest_rows = dest_future.result()
 
-            debug_log(
-                f"Fetched {len(src_rows)} source rows and {len(dest_rows)} destination rows",
-                config,
-                level="medium",
-            )
+                src_iter = iter(src_rows)
+                dest_iter = iter(dest_rows)
 
-            src_iter = iter(src_rows)
-            dest_iter = iter(dest_rows)
+                src_row = next(src_iter, None)
+                dest_row = next(dest_iter, None)
 
-            src_row = next(src_iter, None)
-            dest_row = next(dest_iter, None)
-
-            row_pairs = []
+                row_pairs = []
 
             while src_row is not None or dest_row is not None:
                 if src_row is not None:
@@ -151,43 +153,49 @@ def main():
                     })
                     dest_row = next(dest_iter, None)
 
-            if row_pairs:
-                sample: list[tuple[Any, dict]] = []
-                seen_pks = set()
-                with tqdm(desc="mismatched rows", unit="row") as pbar:
-                    for result in compare_row_pairs(
-                        row_pairs,
-                        parallel=use_parallel,
-                    ):
-                        src_key = result["primary_key"]
-                        if result["mismatches"]:
-                            pbar.update(1)
-                            if src_key not in seen_pks and len(sample) < 2:
-                                sample.append((src_key, result["mismatches"][0]))
-                                seen_pks.add(src_key)
-                            for diff in result["mismatches"]:
-                                writer.write({
-                                    "primary_key": src_key,
-                                    "type": "mismatch",
-                                    "column": diff["column"],
-                                    "source_value": diff["source_value"],
-                                    "dest_value": diff["dest_value"],
-                                    **({
-                                        "source_hash": diff.get("source_hash"),
-                                        "dest_hash": diff.get("dest_hash"),
-                                    } if use_row_hash else {}),
-                                    "year": partition["year"],
-                                    "month": partition["month"],
-                                    "week": partition.get("week"),
-                                })
-                for pk, diff in sample:
-                    debug_log(
-                        f"Sample mismatch PK {pk}, column {diff['column']}: {diff['source_value']} -> {diff['dest_value']}",
-                        config,
-                        level="medium",
-                    )
+                if row_pairs:
+                    sample: list[tuple[Any, dict]] = []
+                    seen_pks = set()
+                    with tqdm(desc="mismatched rows", unit="row") as pbar:
+                        for result in compare_row_pairs(
+                            row_pairs,
+                            parallel=use_parallel,
+                        ):
+                            src_key = result["primary_key"]
+                            if result["mismatches"]:
+                                pbar.update(1)
+                                if src_key not in seen_pks and len(sample) < 2:
+                                    sample.append((src_key, result["mismatches"][0]))
+                                    seen_pks.add(src_key)
+                                for diff in result["mismatches"]:
+                                    writer.write({
+                                        "primary_key": src_key,
+                                        "type": "mismatch",
+                                        "column": diff["column"],
+                                        "source_value": diff["source_value"],
+                                        "dest_value": diff["dest_value"],
+                                        **(
+                                            {
+                                                "source_hash": diff.get("source_hash"),
+                                                "dest_hash": diff.get("dest_hash"),
+                                            }
+                                            if use_row_hash
+                                            else {}
+                                        ),
+                                        "year": partition["year"],
+                                        "month": partition["month"],
+                                        "week": partition.get("week"),
+                                    })
+                    for pk, diff in sample:
+                        debug_log(
+                            f"Sample mismatch PK {pk}, column {diff['column']}: {diff['source_value']} -> {diff['dest_value']}",
+                            config,
+                            level="medium",
+                        )
 
-        writer.close()
+    except Exception as exc:  # pragma: no cover - runtime failure
+        debug_log(f"Reconciliation failed: {exc}", config, level="low")
+        raise
 
 
 if __name__ == "__main__":

@@ -65,7 +65,11 @@ def fetch_rows(
         level="medium",
     )
     read_cursor = conn.cursor()
-    read_cursor.execute(query, params)
+    try:
+        read_cursor.execute(query, params)
+    except Exception as exc:  # pragma: no cover - database error
+        debug_log(f"Query execution failed: {exc}", config, level="low")
+        raise
     read_cursor.arraysize = batch_size
 
     while True:

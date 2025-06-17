@@ -2,14 +2,17 @@
 
 import csv
 import os
-from typing import Iterable, List, Dict
-import pyodbc
+from typing import Iterable, List, Dict, Any
+try:
+    import pyodbc
+except Exception:  # pragma: no cover - optional dependency
+    pyodbc = None  # type: ignore
 
 
 class DiscrepancyWriter:
     """Incrementally write discrepancy records to a SQL Server table."""
 
-    def __init__(self, conn: pyodbc.Connection, schema: str, table: str, batch_size: int = 1000):
+    def __init__(self, conn: Any, schema: str, table: str, batch_size: int = 1000):
         self.conn = conn
         self.schema = schema
         self.table = table
@@ -58,6 +61,17 @@ class DiscrepancyWriter:
 
     def close(self):
         self.flush()
+
+    # ------------------------------------------------------------------
+    # Context manager helpers make ``DiscrepancyWriter`` usable with ``with``
+    # statements which guarantees that ``flush`` is called.
+    # ------------------------------------------------------------------
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
 
 
 def write_discrepancies_to_csv(discrepancies: Iterable[Dict], output_path: str):

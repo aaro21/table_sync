@@ -5,7 +5,7 @@ from datetime import datetime
 
 """Functions for comparing row dictionaries between databases."""
 
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Optional, Tuple
 import hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -94,7 +94,14 @@ def compare_row_pair(args: tuple) -> Optional[list[dict]]:
     )
 
 
-def compare_row_pair_by_pk(src_row: dict, dest_row: dict, columns: Iterable[str], config: dict) -> Optional[dict]:
+def compare_row_pair_by_pk(
+    src_row: dict,
+    dest_row: dict,
+    columns: Iterable[str],
+    config: dict,
+    *,
+    hashes: Optional[Tuple[str, str]] = None,
+) -> Optional[dict]:
     """Compare two rows and return mismatches keyed by primary key."""
     pk_col = config.get("columns", {}).get("primary_key", config.get("primary_key"))
     pk = src_row.get(pk_col)
@@ -103,8 +110,11 @@ def compare_row_pair_by_pk(src_row: dict, dest_row: dict, columns: Iterable[str]
 
     src_hash = dest_hash = None
     if use_row_hash:
-        src_hash = compute_row_hash(src_row)
-        dest_hash = compute_row_hash(dest_row)
+        if hashes:
+            src_hash, dest_hash = hashes
+        else:
+            src_hash = compute_row_hash(src_row)
+            dest_hash = compute_row_hash(dest_row)
         if src_hash == dest_hash:
             return None
 
@@ -210,30 +220,48 @@ def compare_row_pairs(
     parallel: bool = False,
     workers: int = 4,
 ) -> Iterable[dict]:
-    """Yield mismatch details for each pair keyed by primary key."""
+    """Yield mismatch details for each pair keyed by primary key.
+
+    ``row_pairs`` is expected to yield tuples of ``(src_row, dest_row, columns,
+    config)``. When ``parallel`` is true, the comparison work is spread across
+    a thread pool which can significantly speed up large reconciliations.
+    """
 
     if parallel:
         tasks: list[tuple] = []
-        for src_row, dest_row, col_map, config in tqdm(row_pairs, desc="Filtering matched hashes", unit="row"):
+        for src_row, dest_row, col_map, config in tqdm(
+            row_pairs, desc="Filtering matched hashes", unit="row"
+        ):
             use_row_hash = config.get("comparison", {}).get("use_row_hash", False)
+            pair_hashes: Tuple[str, str] | None = None
             if use_row_hash:
                 src_hash = compute_row_hash(src_row)
                 dest_hash = compute_row_hash(dest_row)
                 if src_hash == dest_hash:
                     continue
-            pk_col = config.get("columns", {}).get("primary_key", config.get("primary_key"))
+                pair_hashes = (src_hash, dest_hash)
             columns = list(col_map.keys())
             only_cols = config.get("comparison", {}).get("only_columns")
             if only_cols:
                 columns = [c for c in columns if c in only_cols]
-            tasks.append((src_row, dest_row, columns, config))
+            tasks.append((src_row, dest_row, columns, config, pair_hashes))
 
         if not tasks:
             debug_log("All rows skipped after hash match filtering", config)
             return
 
         with ThreadPoolExecutor(max_workers=workers) as executor:
-            futures = [executor.submit(compare_row_pair_by_pk, *t) for t in tasks]
+            futures = [
+                executor.submit(
+                    compare_row_pair_by_pk,
+                    src,
+                    dest,
+                    cols,
+                    cfg,
+                    hashes=hashes,
+                )
+                for src, dest, cols, cfg, hashes in tasks
+            ]
             for future in tqdm(
                 as_completed(futures),
                 total=len(futures),
@@ -244,17 +272,27 @@ def compare_row_pairs(
                 if result:
                     yield result
     else:
-        for src_row, dest_row, col_map, config in tqdm(row_pairs, desc="Filtering matched hashes", unit="row"):
+        for src_row, dest_row, col_map, config in tqdm(
+            row_pairs, desc="Filtering matched hashes", unit="row"
+        ):
             use_row_hash = config.get("comparison", {}).get("use_row_hash", False)
+            pair_hashes: Tuple[str, str] | None = None
             if use_row_hash:
                 src_hash = compute_row_hash(src_row)
                 dest_hash = compute_row_hash(dest_row)
                 if src_hash == dest_hash:
                     continue
+                pair_hashes = (src_hash, dest_hash)
             columns = list(col_map.keys())
             only_cols = config.get("comparison", {}).get("only_columns")
             if only_cols:
                 columns = [c for c in columns if c in only_cols]
-            result = compare_row_pair_by_pk(src_row, dest_row, columns, config)
+            result = compare_row_pair_by_pk(
+                src_row,
+                dest_row,
+                columns,
+                config,
+                hashes=pair_hashes,
+            )
             if result:
                 yield result
