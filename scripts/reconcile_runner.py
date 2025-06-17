@@ -2,6 +2,7 @@
 
 import argparse
 from typing import Any
+from concurrent.futures import ThreadPoolExecutor
 
 from logic.config_loader import load_config
 from connectors.oracle_connector import get_oracle_connection
@@ -93,8 +94,9 @@ def main():
                             level="low",
                         )
 
-                        src_rows = list(
-                            fetch_rows(
+                        with ThreadPoolExecutor(max_workers=2) as executor:
+                            future_src = executor.submit(
+                                fetch_rows,
                                 src_conn,
                                 src_schema,
                                 src_table,
@@ -103,16 +105,14 @@ def main():
                                 primary_key,
                                 year_column,
                                 month_column,
-                                dialect=src_dialect,
-                                week_column=week_column,
-                                config=config,
-                                limit=config.get("limit"),
-                                pk_value=config.get("record_pk"),
+                                src_dialect,
+                                week_column,
+                                config,
+                                config.get("limit"),
+                                config.get("record_pk"),
                             )
-                        )
-
-                        dest_rows = list(
-                            fetch_rows(
+                            future_dest = executor.submit(
+                                fetch_rows,
                                 dest_conn,
                                 dest_schema,
                                 dest_table,
@@ -121,13 +121,15 @@ def main():
                                 primary_key,
                                 year_column,
                                 month_column,
-                                dialect=dest_dialect,
-                                week_column=week_column,
-                                config=config,
-                                limit=config.get("limit"),
-                                pk_value=config.get("record_pk"),
+                                dest_dialect,
+                                week_column,
+                                config,
+                                config.get("limit"),
+                                config.get("record_pk"),
                             )
-                        )
+
+                            src_rows = list(future_src.result())
+                            dest_rows = list(future_dest.result())
 
                         debug_log(
                             f"Fetched {len(src_rows)} source rows and {len(dest_rows)} destination rows",
