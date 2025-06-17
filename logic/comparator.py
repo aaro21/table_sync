@@ -183,6 +183,7 @@ def compare_row_pair_by_pk(
         result = {"primary_key": pk, "mismatches": mismatches}
         if partition is not None:
             result["partition"] = partition
+        debug_log(f"Row {pk} mismatch detail: {mismatches}", config, level="high")
         return result
     return None
 
@@ -283,8 +284,12 @@ def compare_row_pairs_serial(
         if only_cols:
             cols = [c for c in cols if c in only_cols]
 
+        debug_log(f"Processing PK={src_row.get(config.get('primary_key'))} with raw source: {src_row} and raw dest: {dest_row}", config, level="high")
+
         src_hash = compute_row_hash(src_row)
         dest_hash = compute_row_hash(dest_row)
+
+        debug_log(f"Computed hashes - source: {src_hash}, dest: {dest_hash}", config, level="high")
 
         result = compare_row_pair_by_pk(
             src_row,
@@ -452,6 +457,11 @@ def compare_row_pairs_serial_parallel_batches(
         results = list(compare_row_pairs_serial(chunk, progress=None))
         debug_log(
             f"Found {len(results)} mismatches in chunk",
+            config,
+            level="medium",
+        )
+        debug_log(
+            f"Processed chunk of {len(chunk)} rows - mismatches found: {len(results)}",
             config,
             level="medium",
         )
