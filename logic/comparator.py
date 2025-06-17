@@ -13,6 +13,7 @@ from dateutil import parser
 
 from utils.logger import debug_log
 from tqdm import tqdm
+import pandas as pd
 
 
 def normalize_value(val: Any) -> str:
@@ -267,44 +268,59 @@ def compare_row_pairs_serial(
     yielded immediately.
     """
 
-    cfg_ref: Optional[dict] = None
+    # Collect all rows for batch comparison
+    src_rows, dest_rows, partitions = [], [], []
+    col_maps, configs = [], []
 
-    count = 0
     for item in row_pairs:
         if len(item) == 4:
             src_row, dest_row, col_map, config = item
             part = None
         else:
             src_row, dest_row, col_map, config, part = item
-        cfg_ref = cfg_ref or config
-        cols = list(col_map.keys())
-        only_cols = config.get("comparison", {}).get("only_columns")
-        if only_cols:
-            cols = [c for c in cols if c in only_cols]
-        src_hashes, dest_hashes = compute_row_hashes_parallel([src_row, dest_row], workers=2, mode="thread")
-        src_hash, dest_hash = src_hashes[0], dest_hashes[1]
-        result = compare_row_pair_by_pk(
-            src_row,
-            dest_row,
-            cols,
-            config,
-            partition=part,
-            hashes=(src_hash, dest_hash),
-        )
-        count += 1
-        if progress is not None:
-            if hasattr(progress, "update"):
-                progress.update(1)
-            else:
-                progress.n += 1
-                progress.refresh()
-        if result:
-            debug_log(f"Yielding mismatch result for PK={result.get('primary_key')}: {result}", config, level="high")
-            yield result
+        src_rows.append(src_row)
+        dest_rows.append(dest_row)
+        col_maps.append(col_map)
+        configs.append(config)
+        partitions.append(part)
 
-    if progress is not None and getattr(progress, "total", None) is None:
-        progress.total = count
-        progress.refresh()
+    if not src_rows or not dest_rows:
+        return
+
+    columns = list(col_maps[0].keys())
+    df_src = pd.DataFrame(src_rows)[columns]
+    df_dest = pd.DataFrame(dest_rows)[columns]
+
+    # Sanitize using vectorized logic
+    df_src = df_src.applymap(sanitize)
+    df_dest = df_dest.applymap(sanitize)
+
+    mismatches = []
+    for col in columns:
+        src_col = df_src[col]
+        dest_col = df_dest[col]
+        equal = src_col.eq(dest_col)
+        for idx, match in enumerate(equal):
+            if match:
+                continue
+            if not configs[idx].get("comparison", {}).get("include_nulls", False):
+                if pd.isnull(src_col.iloc[idx]) or pd.isnull(dest_col.iloc[idx]):
+                    continue
+            mismatch = {
+                "primary_key": src_rows[idx].get(configs[idx].get("columns", {}).get("primary_key", configs[idx].get("primary_key"))),
+                "column": col,
+                "source_value": src_col.iloc[idx],
+                "dest_value": dest_col.iloc[idx],
+            }
+            if partitions[idx] is not None:
+                mismatch["partition"] = partitions[idx]
+            mismatches.append(mismatch)
+            if progress is not None:
+                progress.update(1)
+
+    for result in mismatches:
+        debug_log(f"Yielding mismatch result for PK={result.get('primary_key')}: {result}", configs[0], level="high")
+        yield result
 
 
 def compare_row_pairs_parallel_detailed(
