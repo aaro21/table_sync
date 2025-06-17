@@ -301,20 +301,21 @@ def compare_row_pairs_serial(
 
     def compare_column(col):
         results = []
-        src_col = df_src[col]
-        dest_col = df_dest[col]
-        equal = src_col.eq(dest_col)
-        for idx, match in enumerate(equal):
+        src_col = df_src[col].to_numpy()
+        dest_col = df_dest[col].to_numpy()
+        equal_mask = src_col == dest_col
+
+        for idx, match in enumerate(equal_mask):
             if match:
                 continue
             if not configs[idx].get("comparison", {}).get("include_nulls", False):
-                if pd.isnull(src_col.iloc[idx]) or pd.isnull(dest_col.iloc[idx]):
+                if pd.isnull(src_col[idx]) or pd.isnull(dest_col[idx]):
                     continue
             mismatch = {
                 "primary_key": src_rows[idx].get(configs[idx].get("columns", {}).get("primary_key", configs[idx].get("primary_key"))),
                 "column": col,
-                "source_value": src_col.iloc[idx],
-                "dest_value": dest_col.iloc[idx],
+                "source_value": src_col[idx],
+                "dest_value": dest_col[idx],
             }
             if partitions[idx] is not None:
                 mismatch["partition"] = partitions[idx]
