@@ -184,9 +184,11 @@ def main():
 
             sample: list[tuple[Any, dict]] = []
             seen_pks = set()
+            workers = config.get("comparison", {}).get("workers", 4)
             with tqdm(desc="mismatched rows", unit="row") as pbar:
                 for result in compare_row_pairs(
                     generate_pairs(),
+                    workers=workers,
                     parallel=use_parallel,
                     progress=pbar,
                 ):

@@ -237,11 +237,9 @@ def compare_rows(
     return mismatches
 
 
-def compare_row_pairs(
+def compare_row_pairs_serial(
     row_pairs: Iterable[tuple],
     *,
-    parallel: bool = False,
-    workers: int = 4,
     progress=None,
 ) -> Iterable[dict]:
     """Yield mismatch details for each pair keyed by primary key.
@@ -253,6 +251,56 @@ def compare_row_pairs(
     version processes each pair as it arrives so progress is updated in real
     time. Row hashing and column filtering are handled per pair and results are
     yielded immediately.
+    """
+
+    cfg_ref: Optional[dict] = None
+
+    count = 0
+    for item in row_pairs:
+        if len(item) == 4:
+            src_row, dest_row, col_map, config = item
+            part = None
+        else:
+            src_row, dest_row, col_map, config, part = item
+        cfg_ref = cfg_ref or config
+        cols = list(col_map.keys())
+        only_cols = config.get("comparison", {}).get("only_columns")
+        if only_cols:
+            cols = [c for c in cols if c in only_cols]
+        result = compare_row_pair_by_pk(
+            src_row,
+            dest_row,
+            cols,
+            config,
+            partition=part,
+        )
+        count += 1
+        if progress is not None:
+            if hasattr(progress, "update"):
+                progress.update(1)
+            else:
+                progress.n += 1
+                progress.refresh()
+        if result:
+            debug_log(f"Yielding mismatch result for PK={result.get('primary_key')}: {result}", config, level="low")
+            yield result
+
+    if progress is not None and getattr(progress, "total", None) is None:
+        progress.total = count
+        progress.refresh()
+
+
+def compare_row_pairs_parallel_detailed(
+    row_pairs: Iterable[tuple],
+    *,
+    workers: int = 4,
+    progress=None,
+) -> Iterable[dict]:
+    """Yield mismatch details for each pair keyed by primary key in parallel.
+
+    This function uses ThreadPoolExecutor to parallelize detailed row comparisons.
+    ``row_pairs`` must yield ``(src_row, dest_row, columns, config)`` tuples and
+    may optionally include a partition mapping as a 5th element.
     """
 
     cfg_ref: Optional[dict] = None
@@ -278,47 +326,8 @@ def compare_row_pairs(
             src_row, dest_row, col_map, config, part = item
         return src_row, dest_row, col_map, config, part
 
-    if parallel:
-        # Submit all comparisons to the executor immediately so that progress
-        # updates while futures complete. This still requires materialising the
-        # inputs but avoids the two phase hash filtering step which previously
-        # deferred progress updates until the end.
-        tasks = []
-        with ThreadPoolExecutor(max_workers=workers) as executor:
-            for item in row_pairs:
-                src_row, dest_row, col_map, config, part = _prepare(item)
-                cfg_ref = cfg_ref or config
-                cols = list(col_map.keys())
-                only_cols = config.get("comparison", {}).get("only_columns")
-                if only_cols:
-                    cols = [c for c in cols if c in only_cols]
-                tasks.append(
-                    executor.submit(
-                        compare_row_pair_by_pk,
-                        src_row,
-                        dest_row,
-                        cols,
-                        config,
-                        partition=part,
-                    )
-                )
-
-            if progress is not None and total is None:
-                progress.total = len(tasks)
-                progress.refresh()
-
-            for fut in as_completed(tasks):
-                result = fut.result()
-                if progress is not None:
-                    if hasattr(progress, "update"):
-                        progress.update(1)
-                    else:
-                        progress.n += 1
-                        progress.refresh()
-                if result:
-                    yield result
-    else:
-        count = 0
+    tasks = []
+    with ThreadPoolExecutor(max_workers=workers) as executor:
         for item in row_pairs:
             src_row, dest_row, col_map, config, part = _prepare(item)
             cfg_ref = cfg_ref or config
@@ -326,14 +335,23 @@ def compare_row_pairs(
             only_cols = config.get("comparison", {}).get("only_columns")
             if only_cols:
                 cols = [c for c in cols if c in only_cols]
-            result = compare_row_pair_by_pk(
-                src_row,
-                dest_row,
-                cols,
-                config,
-                partition=part,
+            tasks.append(
+                executor.submit(
+                    compare_row_pair_by_pk,
+                    src_row,
+                    dest_row,
+                    cols,
+                    config,
+                    partition=part,
+                )
             )
-            count += 1
+
+        if progress is not None and total is None:
+            progress.total = len(tasks)
+            progress.refresh()
+
+        for fut in as_completed(tasks):
+            result = fut.result()
             if progress is not None:
                 if hasattr(progress, "update"):
                     progress.update(1)
@@ -341,9 +359,23 @@ def compare_row_pairs(
                     progress.n += 1
                     progress.refresh()
             if result:
-                debug_log(f"Yielding mismatch result for PK={result.get('primary_key')}: {result}", config, level="low")
                 yield result
 
-        if progress is not None and progress.total is None:
-            progress.total = count
-            progress.refresh()
+
+def compare_row_pairs(
+    row_pairs: Iterable[tuple],
+    *,
+    workers: int = 4,
+    progress=None,
+) -> Iterable[dict]:
+    config = None
+    for item in row_pairs:
+        if len(item) >= 4:
+            config = item[3]
+            break
+
+    use_parallel = config.get("comparison", {}).get("parallel", False) if config else False
+
+    if use_parallel:
+        return compare_row_pairs_parallel_detailed(row_pairs, workers=workers, progress=progress)
+    return compare_row_pairs_serial(row_pairs, progress=progress)

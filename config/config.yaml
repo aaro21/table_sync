@@ -33,6 +33,7 @@ primary_key: id
 comparison:
   use_row_hash: true
   parallel: true
+  workers: 4
 
 partitioning:
   year_column: year
