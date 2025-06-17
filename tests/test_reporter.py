@@ -24,3 +24,12 @@ def test_discrepancy_writer_context_manager():
         writer.write({"a": "2"})
     # ensure flush was called and table created
     assert conn.cursor().executed
+
+
+def test_discrepancy_writer_adds_columns():
+    conn = DummyConn()
+    with DiscrepancyWriter(conn, "dbo", "t", batch_size=2) as writer:
+        writer.write({"a": "1"})
+        writer.write({"a": "2", "b": "x"})
+    executed = "\n".join(conn.cursor().executed)
+    assert "ALTER TABLE" in executed and "[b]" in executed

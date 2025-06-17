@@ -38,8 +38,24 @@ class DiscrepancyWriter:
         self.conn.commit()
         self.prepared = True
 
+    def _ensure_columns(self, record: Dict):
+        """Add any new columns from *record* to the output table."""
+        if self.columns is None:
+            return
+        new_cols = [c for c in record.keys() if c not in self.columns]
+        if not new_cols:
+            return
+        cursor = self.conn.cursor()
+        full_table = self._full_table()
+        for col in new_cols:
+            alter_sql = f"ALTER TABLE {full_table} ADD [{col}] NVARCHAR(MAX)"
+            cursor.execute(alter_sql)
+            self.columns.append(col)
+        self.conn.commit()
+
     def write(self, record: Dict):
         self._prepare_table(record)
+        self._ensure_columns(record)
         self.buffer.append(record)
         if len(self.buffer) >= self.batch_size:
             self.flush()
