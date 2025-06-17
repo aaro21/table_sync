@@ -81,7 +81,8 @@ def _filter_pairs_by_hash(
 ) -> Iterable[tuple]:
     """Yield row pairs where source and destination row hashes differ."""
 
-    def process(chunk: list[tuple]) -> list[tuple]:
+    def process(chunk: list[tuple], chunk_idx: int) -> list[tuple]:
+        debug_log(f"Processing chunk {chunk_idx + 1} with {len(chunk)} pairs", None, level="medium")
         src_rows = [p[0] for p in chunk]
         dest_rows = [p[1] for p in chunk]
         src_hashes = compute_row_hashes_parallel(src_rows, workers=workers, mode=mode)
@@ -92,8 +93,10 @@ def _filter_pairs_by_hash(
                 result.append(pair)
         return result
 
-    for chunk in _chunked(row_pairs, chunk_size):
-        for pair in process(chunk):
+    # Materialize chunks for tqdm progress bar
+    chunks = list(_chunked(row_pairs, chunk_size))
+    for i, chunk in enumerate(tqdm(chunks, desc="Filtering hash mismatches", unit="chunk")):
+        for pair in process(chunk, i):
             yield pair
 
 
