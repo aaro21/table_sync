@@ -25,11 +25,18 @@ def main():
         choices=["low", "medium", "high"],
         help="set debug level",
     )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        help="maximum number of rows to fetch per table",
+    )
     args = parser.parse_args()
 
     config = load_config()
     if args.debug:
         config["debug"] = args.debug
+    if args.limit:
+        config["limit"] = args.limit
 
     debug_log("Starting reconciliation run", config, level="low")
 
@@ -78,6 +85,7 @@ def main():
                             dialect=src_dialect,
                             week_column=week_column,
                             config=config,
+                            limit=config.get("limit"),
                         )
                     )
 
@@ -94,6 +102,7 @@ def main():
                             dialect=dest_dialect,
                             week_column=week_column,
                             config=config,
+                            limit=config.get("limit"),
                         )
                     )
 

@@ -18,8 +18,17 @@ def fetch_rows(
     dialect: str = "sqlserver",  # default to sqlserver
     week_column: Optional[str] = None,
     config: Optional[dict] = None,
+    limit: Optional[int] = None,
 ) -> Iterable[Dict]:
-    """Yield rows filtered by partition in primary key order."""
+    """Yield rows filtered by partition in primary key order.
+
+    Parameters
+    ----------
+    limit:
+        Optional maximum number of rows returned. ``None`` means no limit.
+        When provided, the value is applied directly in the SQL query using
+        ``FETCH FIRST``/``OFFSET`` syntax depending on the dialect.
+    """
     # Cast partition identifiers to strings so that filtering works for
     # both numeric and varchar column types. This avoids implicit type
     # conversion issues when year/month columns are stored as VARCHAR.
@@ -40,10 +49,15 @@ def fetch_rows(
             FROM {full_table}
             WHERE {year_column} = :1 AND {month_column} = :2"""
         params = [year, month]
+        param_idx = 3
         if "week" in partition and week_column:
             query += f" AND {week_column} = :3"
             params.append(week)
+            param_idx = 4
         query += f" ORDER BY {columns[primary_key]}"
+        if limit is not None:
+            query += f" FETCH FIRST :{param_idx} ROWS ONLY"
+            params.append(int(limit))
         params = tuple(params)
     elif dialect == "sqlserver":
         query = f"""
@@ -55,6 +69,9 @@ def fetch_rows(
             query += f" AND {week_column} = ?"
             params.append(week)
         query += f" ORDER BY {columns[primary_key]}"
+        if limit is not None:
+            query += " OFFSET 0 ROWS FETCH NEXT ? ROWS ONLY"
+            params.append(int(limit))
         params = tuple(params)
     else:
         raise ValueError(f"Unsupported SQL dialect: {dialect}")
@@ -78,3 +95,4 @@ def fetch_rows(
             break
         for row in rows:
             yield dict(zip(logical_cols, row))
+
