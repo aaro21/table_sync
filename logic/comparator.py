@@ -295,8 +295,12 @@ def compare_row_pairs_serial(
     df_src = df_src.applymap(sanitize)
     df_dest = df_dest.applymap(sanitize)
 
+    from concurrent.futures import ThreadPoolExecutor
+
     mismatches = []
-    for col in columns:
+
+    def compare_column(col):
+        results = []
         src_col = df_src[col]
         dest_col = df_dest[col]
         equal = src_col.eq(dest_col)
@@ -314,9 +318,16 @@ def compare_row_pairs_serial(
             }
             if partitions[idx] is not None:
                 mismatch["partition"] = partitions[idx]
-            mismatches.append(mismatch)
+            results.append(mismatch)
+        return results
+
+    with ThreadPoolExecutor() as executor:
+        future_to_col = {executor.submit(compare_column, col): col for col in columns}
+        for future in future_to_col:
+            results = future.result()
+            mismatches.extend(results)
             if progress is not None:
-                progress.update(1)
+                progress.update(len(results))
 
     for result in mismatches:
         debug_log(f"Yielding mismatch result for PK={result.get('primary_key')}: {result}", configs[0], level="high")
