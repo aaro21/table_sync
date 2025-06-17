@@ -430,8 +430,7 @@ def compare_row_pairs(
         if parallel_mode == "batch":
             return compare_row_pairs_serial_parallel_batches(row_pairs, workers=workers, progress=progress)
         return compare_row_pairs_parallel_detailed(row_pairs, workers=workers, progress=progress)
-    results = list(compare_row_pairs_serial(row_pairs, progress=progress))
-    return results
+    yield from compare_row_pairs_serial(row_pairs, progress=progress)
 
 
 # New function for batch parallelization
