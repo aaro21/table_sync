@@ -46,6 +46,14 @@ python scripts/reconcile_runner.py --limit 50000
 This restricts the amount of data retrieved from each table by applying a
 `FETCH FIRST`/`OFFSET` clause in the SQL queries, which speeds up test runs.
 
+Use the `--output-mismatches` flag to print discrepancy records to stdout instead
+of solely writing them to the SQL Server table. This is useful when testing
+connectivity issues:
+
+```bash
+python scripts/reconcile_runner.py --output-mismatches
+```
+
 This repository is intentionally minimal and focuses only on the core
 logic for comparing tables. Many features are missing, including retry
 logic, logging and tests.
