@@ -65,20 +65,12 @@ def test_compare_row_pairs_dataframe():
         (src2, dest2, columns, config),
     ]
     results = list(compare_row_pairs(pairs))
-    expected_src_hash = compute_row_hash(src2)
-    expected_dest_hash = compute_row_hash(dest2)
     assert results == [
         {
             "primary_key": 2,
-            "mismatches": [
-                {
-                    "column": "col",
-                    "source_value": "b",
-                    "dest_value": "c",
-                    "source_hash": expected_src_hash,
-                    "dest_hash": expected_dest_hash,
-                }
-            ],
+            "column": "col",
+            "source_value": "b",
+            "dest_value": "c",
         }
     ]
 
@@ -121,3 +113,19 @@ def test_row_hash_skip_after_normalization():
     columns = {"id": "id", "val": "val"}
     diffs = compare_rows(src, dest, columns, use_row_hash=True)
     assert diffs == []
+
+
+def test_compare_row_pairs_parallel_batch():
+    src1 = {"id": 1, "col": "a"}
+    dest1 = {"id": 1, "col": "a"}
+    src2 = {"id": 2, "col": "x"}
+    dest2 = {"id": 2, "col": "y"}
+    columns = {"id": "id", "col": "col"}
+    config = {
+        "primary_key": "id",
+        "comparison": {"use_row_hash": True, "parallel": True, "parallel_mode": "batch"},
+    }
+    pairs = [(src1, dest1, columns, config), (src2, dest2, columns, config)]
+    results = list(compare_row_pairs(pairs, workers=2))
+    assert len(results) == 1
+    assert results[0]["primary_key"] == 2

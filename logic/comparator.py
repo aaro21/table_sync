@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any, Iterable, Optional, Tuple, List
 import xxhash
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
+from itertools import islice, chain
 
 from dateutil import parser
 
@@ -59,6 +60,41 @@ def _hash_pair(pair: tuple) -> tuple[str, str]:
     """Return ``(src_hash, dest_hash)`` for a row pair."""
     src_row, dest_row = pair[0], pair[1]
     return compute_row_hash(src_row), compute_row_hash(dest_row)
+
+
+def _chunked(iterable: Iterable, size: int) -> Iterable[list]:
+    """Yield lists of *size* elements from *iterable*."""
+    it = iter(iterable)
+    while True:
+        chunk = list(islice(it, size))
+        if not chunk:
+            break
+        yield chunk
+
+
+def _filter_pairs_by_hash(
+    row_pairs: Iterable[tuple],
+    *,
+    workers: int = 4,
+    chunk_size: int = 100_000,
+    mode: str = "thread",
+) -> Iterable[tuple]:
+    """Yield row pairs where source and destination row hashes differ."""
+
+    def process(chunk: list[tuple]) -> list[tuple]:
+        src_rows = [p[0] for p in chunk]
+        dest_rows = [p[1] for p in chunk]
+        src_hashes = compute_row_hashes_parallel(src_rows, workers=workers, mode=mode)
+        dest_hashes = compute_row_hashes_parallel(dest_rows, workers=workers, mode=mode)
+        result: list[tuple] = []
+        for pair, s_h, d_h in zip(chunk, src_hashes, dest_hashes):
+            if s_h != d_h:
+                result.append(pair)
+        return result
+
+    for chunk in _chunked(row_pairs, chunk_size):
+        for pair in process(chunk):
+            yield pair
 
 
 def values_equal(source_val: Any, dest_val: Any) -> bool:
@@ -287,7 +323,16 @@ def compare_row_pairs_serial(
     if not src_rows or not dest_rows:
         return
 
+    if progress is not None:
+        progress.total = len(src_rows)
+        if hasattr(progress, "refresh"):
+            progress.refresh()
+
     columns = list(col_maps[0].keys())
+    only_cols = configs[0].get("comparison", {}).get("only_columns")
+    if only_cols:
+        columns = [c for c in columns if c in only_cols]
+
     df_src = pd.DataFrame(src_rows)[columns]
     df_dest = pd.DataFrame(dest_rows)[columns]
 
@@ -328,7 +373,11 @@ def compare_row_pairs_serial(
             results = future.result()
             mismatches.extend(results)
             if progress is not None:
-                progress.update(len(results))
+                if hasattr(progress, "update"):
+                    progress.update(len(results))
+                else:
+                    progress.n += len(results)
+                    progress.refresh()
 
     for result in mismatches:
         debug_log(f"Yielding mismatch result for PK={result.get('primary_key')}: {result}", configs[0], level="high")
@@ -348,6 +397,11 @@ def compare_row_pairs_parallel_detailed(
     ``row_pairs`` must yield ``(src_row, dest_row, columns, config)`` tuples and
     may optionally include a partition mapping as a 5th element.
     """
+
+    if parallel_mode == "batch":
+        return compare_row_pairs_parallel_batch(
+            row_pairs, workers=workers, progress=progress
+        )
 
     cfg_ref: Optional[dict] = None
 
@@ -411,21 +465,44 @@ def compare_row_pairs_parallel_detailed(
                 yield result
 
 
+def compare_row_pairs_parallel_batch(
+    row_pairs: Iterable[tuple],
+    *,
+    workers: int = 4,
+    progress=None,
+    chunk_size: int = 100_000,
+) -> Iterable[dict]:
+    """Filter row pairs by hash in chunks then compare mismatched pairs."""
+
+    filtered = _filter_pairs_by_hash(
+        row_pairs, workers=workers, chunk_size=chunk_size, mode="thread"
+    )
+    for result in compare_row_pairs_parallel_detailed(
+        filtered, workers=workers, progress=progress, parallel_mode="thread"
+    ):
+        yield result
+
+
 def compare_row_pairs(
     row_pairs: Iterable[tuple],
     *,
     workers: int = 4,
     progress=None,
 ) -> Iterable[dict]:
-    config = None
-    for item in row_pairs:
-        if len(item) >= 4:
-            config = item[3]
-            break
+    it = iter(row_pairs)
+    first = next(it, None)
+    if first is None:
+        return []
+
+    config = first[3] if len(first) >= 4 else None
 
     use_parallel = config.get("comparison", {}).get("parallel", False) if config else False
     parallel_mode = config.get("comparison", {}).get("parallel_mode", "thread") if config else "thread"
 
+    pairs = chain([first], it)
+
     if use_parallel:
-        return compare_row_pairs_parallel_detailed(row_pairs, workers=workers, progress=progress)
-    return compare_row_pairs_serial(row_pairs, progress=progress)
+        if parallel_mode == "batch":
+            return compare_row_pairs_parallel_batch(pairs, workers=workers, progress=progress)
+        return compare_row_pairs_parallel_detailed(pairs, workers=workers, progress=progress, parallel_mode=parallel_mode)
+    return compare_row_pairs_serial(pairs, progress=progress)
