@@ -101,6 +101,7 @@ def compare_row_pair_by_pk(
     config: dict,
     *,
     hashes: Optional[Tuple[str, str]] = None,
+    partition: Optional[dict] = None,
 ) -> Optional[dict]:
     """Compare two rows and return mismatches keyed by primary key."""
     pk_col = config.get("columns", {}).get("primary_key", config.get("primary_key"))
@@ -145,7 +146,10 @@ def compare_row_pair_by_pk(
             config,
             level="medium",
         )
-        return {"primary_key": pk, "mismatches": mismatches}
+        result = {"primary_key": pk, "mismatches": mismatches}
+        if partition is not None:
+            result["partition"] = partition
+        return result
     return None
 
 
@@ -232,9 +236,14 @@ def compare_row_pairs(
     # Phase 1 - compute row hashes and collect only the pairs that differ.
     # ------------------------------------------------------------------
     tasks: List[tuple] = []
-    for src_row, dest_row, col_map, config in tqdm(
-        row_pairs, desc="Filtering matched hashes", unit="row"
-    ):
+    cfg_ref: Optional[dict] = None
+    for item in tqdm(row_pairs, desc="Filtering matched hashes", unit="row"):
+        if len(item) == 4:
+            src_row, dest_row, col_map, config = item
+            partition = None
+        else:
+            src_row, dest_row, col_map, config, partition = item
+        cfg_ref = config
         use_row_hash = config.get("comparison", {}).get("use_row_hash", False)
         pair_hashes: Tuple[str, str] | None = None
         if use_row_hash:
@@ -247,10 +256,10 @@ def compare_row_pairs(
         only_cols = config.get("comparison", {}).get("only_columns")
         if only_cols:
             columns = [c for c in columns if c in only_cols]
-        tasks.append((src_row, dest_row, columns, config, pair_hashes))
+        tasks.append((src_row, dest_row, columns, config, pair_hashes, partition))
 
     if not tasks:
-        debug_log("All rows skipped after hash match filtering", config)
+        debug_log("All rows skipped after hash match filtering", cfg_ref)
         return
 
     # ------------------------------------------------------------------
@@ -266,8 +275,9 @@ def compare_row_pairs(
                     cols,
                     cfg,
                     hashes=hashes,
+                    partition=part,
                 )
-                for src, dest, cols, cfg, hashes in tasks
+                for src, dest, cols, cfg, hashes, part in tasks
             ]
             for future in tqdm(
                 as_completed(futures),
@@ -279,7 +289,7 @@ def compare_row_pairs(
                 if result:
                     yield result
     else:
-        for src, dest, cols, cfg, hashes in tqdm(
+        for src, dest, cols, cfg, hashes, part in tqdm(
             tasks, desc="Comparing mismatched rows", unit="row"
         ):
             result = compare_row_pair_by_pk(
@@ -288,6 +298,7 @@ def compare_row_pairs(
                 cols,
                 cfg,
                 hashes=hashes,
+                partition=part,
             )
             if result:
                 yield result
