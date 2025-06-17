@@ -31,12 +31,15 @@ class DiscrepancyWriter:
         self.columns = list(record.keys())
         cursor = self.conn.cursor()
         full_table = self._full_table()
-        drop_sql = f"IF OBJECT_ID('{full_table}', 'U') IS NOT NULL DROP TABLE {full_table}"
-        cursor.execute(drop_sql)
         column_defs = ", ".join(f"[{c}] NVARCHAR(MAX)" for c in self.columns)
-        create_sql = f"CREATE TABLE {full_table} ({column_defs})"
+        create_sql = f"""
+        IF OBJECT_ID('{full_table}', 'U') IS NULL
+        BEGIN
+            CREATE TABLE {full_table} ({column_defs})
+        END
+        """
         cursor.execute(create_sql)
-        debug_log(f"Creating discrepancy table: {full_table}", {}, level="low")
+        debug_log(f"Ensuring discrepancy table exists: {full_table}", {}, level="low")
         self.conn.commit()
         self.prepared = True
 
@@ -52,22 +55,38 @@ class DiscrepancyWriter:
             debug_log("Flush called but buffer is empty.", {}, level="low")
             return
         cursor = self.conn.cursor()
-        cursor.fast_executemany = True
         full_table = self._full_table()
-        placeholders = ", ".join("?" for _ in self.columns)
-        insert_sql = (
-            f"INSERT INTO {full_table} ({', '.join('[' + c + ']' for c in self.columns)}) "
-            f"VALUES ({placeholders})"
-        )
-        values = [[rec.get(c) for c in self.columns] for rec in self.buffer]
         try:
-            cursor.executemany(insert_sql, values)
+            for rec in self.buffer:
+                self._merge_records(cursor, full_table, [rec])
             self.conn.commit()
-            debug_log(f"Inserted {len(values)} rows into {full_table}", {}, level="low")
+            debug_log(f"Merged {len(self.buffer)} rows into {full_table}", {}, level="low")
         except Exception as e:
-            debug_log(f"Failed to insert rows into {full_table}: {e}", {}, level="high")
+            debug_log(f"Failed to merge rows into {full_table}: {e}", {}, level="high")
             raise
         self.buffer.clear()
+
+    def _merge_records(self, cursor, full_table: str, records: List[Dict]):
+        key_cols = ["primary_key", "column"]  # Composite key
+        for rec in records:
+            update_set = ", ".join(f"[{col}] = ?" for col in self.columns if col not in key_cols)
+            insert_cols = ", ".join(f"[{col}]" for col in self.columns)
+            insert_vals = ", ".join("?" for _ in self.columns)
+
+            on_clause = " AND ".join(f"target.[{col}] = source.[{col}]" for col in key_cols)
+            using_select = ", ".join(f"? AS [{col}]" for col in key_cols)
+
+            merge_sql = f"""
+            MERGE {full_table} AS target
+            USING (SELECT {using_select}) AS source
+            ON {on_clause}
+            WHEN MATCHED THEN
+                UPDATE SET {update_set}
+            WHEN NOT MATCHED THEN
+                INSERT ({insert_cols}) VALUES ({insert_vals});
+            """
+            values = [rec[col] for col in key_cols] + [rec[col] for col in self.columns if col not in key_cols] + [rec[col] for col in self.columns]
+            cursor.execute(merge_sql, values)
 
     def close(self):
         self.flush()
