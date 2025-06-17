@@ -132,6 +132,12 @@ def compare_row_pair_by_pk(
         if src_hash == dest_hash:
             return None
 
+    debug_log(f"Comparing row with PK={pk} using columns: {columns}", config, level="low")
+    for col in columns:
+        src_val = sanitize(src_row.get(col))
+        dest_val = sanitize(dest_row.get(col))
+        debug_log(f"  {col}: src={src_val} dest={dest_val}", config, level="low")
+
     mismatches: list[dict] = []
     for col in columns:
         src_val = sanitize(src_row.get(col))
