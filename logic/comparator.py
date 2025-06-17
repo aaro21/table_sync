@@ -7,7 +7,7 @@ from datetime import datetime
 
 from typing import Any, Iterable, Optional, Tuple, List
 import xxhash
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 
 from dateutil import parser
 
@@ -41,12 +41,14 @@ def compute_row_hash(row: dict) -> str:
     return h.hexdigest()
 
 
-def compute_row_hashes_parallel(rows: list[dict], *, workers: int = 4) -> list[str]:
-    """Compute hashes for rows in parallel."""
+def compute_row_hashes_parallel(rows: list[dict], *, workers: int = 4, mode: str = "thread") -> list[str]:
+    """Compute hashes for rows in parallel using thread or process mode."""
     def _hash_row(row: dict) -> str:
         return compute_row_hash(row)
 
-    with ThreadPoolExecutor(max_workers=workers) as executor:
+    Executor = ThreadPoolExecutor if mode == "thread" else ProcessPoolExecutor
+    debug_log(f"Using {Executor.__name__} for parallel hashing", None, level="low")
+    with Executor(max_workers=workers) as executor:
         return list(executor.map(_hash_row, rows))
 
 
@@ -142,7 +144,7 @@ def compare_row_pair_by_pk(
         if src_hash == dest_hash:
             return None
 
-    debug_log(f"Comparing row with PK={pk} using columns: {columns}", config, level="low")
+    debug_log(f"Comparing row with PK={pk} using columns: {columns}", config, level="high")
     for col in columns:
         src_val = sanitize(src_row.get(col))
         dest_val = sanitize(dest_row.get(col))
@@ -277,7 +279,7 @@ def compare_row_pairs_serial(
         only_cols = config.get("comparison", {}).get("only_columns")
         if only_cols:
             cols = [c for c in cols if c in only_cols]
-        src_hashes, dest_hashes = compute_row_hashes_parallel([src_row, dest_row], workers=2)
+        src_hashes, dest_hashes = compute_row_hashes_parallel([src_row, dest_row], workers=2, mode="process")
         src_hash, dest_hash = src_hashes[0], dest_hashes[1]
         result = compare_row_pair_by_pk(
             src_row,
@@ -295,7 +297,7 @@ def compare_row_pairs_serial(
                 progress.n += 1
                 progress.refresh()
         if result:
-            debug_log(f"Yielding mismatch result for PK={result.get('primary_key')}: {result}", config, level="low")
+            debug_log(f"Yielding mismatch result for PK={result.get('primary_key')}: {result}", config, level="high")
             yield result
 
     if progress is not None and getattr(progress, "total", None) is None:
@@ -308,6 +310,7 @@ def compare_row_pairs_parallel_detailed(
     *,
     workers: int = 4,
     progress=None,
+    parallel_mode: str = "thread",
 ) -> Iterable[dict]:
     """Yield mismatch details for each pair keyed by primary key in parallel.
 
@@ -348,7 +351,7 @@ def compare_row_pairs_parallel_detailed(
             only_cols = config.get("comparison", {}).get("only_columns")
             if only_cols:
                 cols = [c for c in cols if c in only_cols]
-            src_hashes, dest_hashes = compute_row_hashes_parallel([src_row, dest_row], workers=2)
+            src_hashes, dest_hashes = compute_row_hashes_parallel([src_row, dest_row], workers=2, mode="process")
             src_hash, dest_hash = src_hashes[0], dest_hashes[1]
             tasks.append(
                 executor.submit(
@@ -391,6 +394,7 @@ def compare_row_pairs(
             break
 
     use_parallel = config.get("comparison", {}).get("parallel", False) if config else False
+    parallel_mode = config.get("comparison", {}).get("parallel_mode", "thread") if config else "thread"
 
     if use_parallel:
         return compare_row_pairs_parallel_detailed(row_pairs, workers=workers, progress=progress)
