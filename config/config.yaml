@@ -33,6 +33,7 @@ primary_key: id
 comparison:
   use_row_hash: true
   parallel: true
+  parallel_mode: batch
   include_nulls: true
   workers: 4
 
