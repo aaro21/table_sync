@@ -427,5 +427,42 @@ def compare_row_pairs(
     parallel_mode = config.get("comparison", {}).get("parallel_mode", "thread") if config else "thread"
 
     if use_parallel:
+        if parallel_mode == "batch":
+            return compare_row_pairs_serial_parallel_batches(row_pairs, workers=workers, progress=progress)
         return compare_row_pairs_parallel_detailed(row_pairs, workers=workers, progress=progress)
     return compare_row_pairs_serial(row_pairs, progress=progress)
+
+
+# New function for batch parallelization
+def compare_row_pairs_serial_parallel_batches(
+    row_pairs: Iterable[tuple],
+    *,
+    workers: int = 4,
+    progress=None,
+) -> Iterable[dict]:
+    """Split row_pairs into batches and compare each batch in parallel using threads."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    row_pairs = list(row_pairs)
+    if not row_pairs:
+        return
+
+    chunk_size = max(1, len(row_pairs) // workers)
+
+    def process_chunk(chunk):
+        return list(compare_row_pairs_serial(chunk, progress=None))
+
+    results = []
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = [
+            executor.submit(process_chunk, row_pairs[i:i + chunk_size])
+            for i in range(0, len(row_pairs), chunk_size)
+        ]
+        for fut in futures:
+            batch_result = fut.result()
+            results.extend(batch_result)
+            if progress:
+                progress.update(len(batch_result))
+
+    for r in results:
+        yield r
