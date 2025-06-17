@@ -41,11 +41,13 @@ def compute_row_hash(row: dict) -> str:
     return h.hexdigest()
 
 
+def _hash_row(row: dict) -> str:
+    """Top-level function so it can be used with multiprocessing."""
+    return compute_row_hash(row)
+
+
 def compute_row_hashes_parallel(rows: list[dict], *, workers: int = 4, mode: str = "thread") -> list[str]:
     """Compute hashes for rows in parallel using thread or process mode."""
-    def _hash_row(row: dict) -> str:
-        return compute_row_hash(row)
-
     Executor = ThreadPoolExecutor if mode == "thread" else ProcessPoolExecutor
     debug_log(f"Using {Executor.__name__} for parallel hashing", None, level="low")
     with Executor(max_workers=workers) as executor:
