@@ -15,6 +15,11 @@ from utils.logger import debug_log
 from tqdm import tqdm
 
 
+def fetch_all_rows(**kwargs):
+    """Helper to materialize rows in a worker thread."""
+    return list(fetch_rows(**kwargs))
+
+
 def main():
     """Run the reconciliation process based on ``config/config.yaml``."""
 
@@ -96,7 +101,7 @@ def main():
 
                         with ThreadPoolExecutor(max_workers=2) as executor:
                             future_src = executor.submit(
-                                fetch_rows,
+                                fetch_all_rows,
                                 conn=src_conn,
                                 schema=src_schema,
                                 table=src_table,
@@ -112,7 +117,7 @@ def main():
                                 pk_value=config.get("record_pk"),
                             )
                             future_dest = executor.submit(
-                                fetch_rows,
+                                fetch_all_rows,
                                 conn=dest_conn,
                                 schema=dest_schema,
                                 table=dest_table,
@@ -128,8 +133,8 @@ def main():
                                 pk_value=config.get("record_pk"),
                             )
 
-                            src_rows = list(future_src.result())
-                            dest_rows = list(future_dest.result())
+                            src_rows = future_src.result()
+                            dest_rows = future_dest.result()
 
                         debug_log(
                             f"Fetched {len(src_rows)} source rows and {len(dest_rows)} destination rows",
