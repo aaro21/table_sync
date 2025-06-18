@@ -227,7 +227,13 @@ def main():
                                         "month": part.get("month"),
                                         "week": part.get("week"),
                                     })
-                        writer.flush()
+
+                        # Flush discrepancy records for this partition once all
+                        # comparison results have been processed. This ensures
+                        # mismatches detected during ``row_pairs`` iteration are
+                        # persisted even when ``compare_row_pairs`` yields no
+                        # results for the current partition.
+                    writer.flush()
 
                 for pk, diff in sample:
                     debug_log(
