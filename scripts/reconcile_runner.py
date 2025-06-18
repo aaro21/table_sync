@@ -94,7 +94,7 @@ def main():
                 sample: list[tuple[Any, dict]] = []
                 seen_pks = set()
                 workers = config.get("comparison", {}).get("workers", 4)
-                with tqdm(desc="mismatched rows", unit="row") as pbar:
+                with tqdm(desc="mismatches found", unit="row") as pbar:
                     for partition in get_partitions(config):
                         debug_log(
                             f"Partition: {partition}",
@@ -154,7 +154,7 @@ def main():
                         total_rows = max(len(src_rows), len(dest_rows))
 
                         def row_pairs():
-                            with tqdm(total=total_rows, desc="processing rows", unit="row") as progress:
+                            with tqdm(total=total_rows, desc="processing row pairs", unit="row") as progress:
                                 nonlocal src_row, dest_row
                                 while src_row is not None or dest_row is not None:
                                     if src_row is not None:
