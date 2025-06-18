@@ -29,12 +29,12 @@ class DiscrepancyWriter:
         if self.prepared:
             return
         self.columns = list(record.keys())
-        cursor = self.conn.cursor()
-        full_table = self._full_table()
         column_defs = ", ".join(
             f"[{c}] VARCHAR(500)" if c in ("primary_key", "column") else f"[{c}] VARCHAR(MAX)"
             for c in self.columns
-        )
+        ) + ", [record_insert_datetime] DATETIME DEFAULT GETDATE()"
+        cursor = self.conn.cursor()
+        full_table = self._full_table()
         create_sql = f"""
         IF OBJECT_ID('{full_table}', 'U') IS NULL
         BEGIN
@@ -73,6 +73,8 @@ class DiscrepancyWriter:
         self.buffer.clear()
 
     def _create_temp_table(self, cursor, temp_table: str):
+        if "record_insert_datetime" not in self.columns:
+            self.columns.append("record_insert_datetime")
         column_defs = ", ".join(
             f"[{c}] VARCHAR(500)" if c in ("primary_key", "column") else f"[{c}] VARCHAR(MAX)"
             for c in self.columns
@@ -81,6 +83,12 @@ class DiscrepancyWriter:
         cursor.execute(f"CREATE TABLE {temp_table} ({column_defs})")
 
     def _bulk_insert_temp(self, cursor, temp_table: str, records: List[Dict]):
+        from datetime import datetime
+        if "record_insert_datetime" not in self.columns:
+            self.columns.append("record_insert_datetime")
+        for rec in records:
+            if "record_insert_datetime" not in rec:
+                rec["record_insert_datetime"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         insert_sql = f"INSERT INTO {temp_table} ({', '.join(f'[{c}]' for c in self.columns)}) VALUES ({', '.join('?' for _ in self.columns)})"
         values = [[rec[c] for c in self.columns] for rec in records]
         cursor.fast_executemany = True
@@ -93,7 +101,8 @@ class DiscrepancyWriter:
             raise ValueError("Cannot merge without key columns")
 
         on_clause = " AND ".join(f"target.[{c}] = source.[{c}]" for c in key_cols)
-        update_clause = ", ".join(f"target.[{c}] = source.[{c}]" for c in self.columns if c not in key_cols)
+        update_cols = [c for c in self.columns if c not in key_cols]
+        update_clause = ", ".join(f"target.[{c}] = source.[{c}]" for c in update_cols)
         insert_cols = ", ".join(f"[{c}]" for c in self.columns)
         insert_vals = ", ".join(f"source.[{c}]" for c in self.columns)
 
