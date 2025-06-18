@@ -51,7 +51,7 @@ def fix_mismatches(config: Dict, *, dry_run: Optional[bool] = None) -> None:
 
         for partition in get_partitions(config):
             part_params = [partition["year"], partition["month"]]
-            where_clauses = ["src.type = 'mismatch'", "src.[year] = ?", "src.[month] = ?"]
+            where_clauses = ["[type] = 'mismatch'", "[year] = ?", "[month] = ?"]
 
             if "week" in partition:
                 part_params.append(partition["week"])
@@ -101,6 +101,27 @@ def fix_mismatches(config: Dict, *, dry_run: Optional[bool] = None) -> None:
                     affected = cur.rowcount
                     conn.commit()
 
+                    # Delete the updated records from the output table to prevent reprocessing
+                    delete_where = where_clauses + ["[column] = ?", f"[{pk_col}] = dest.[{pk_col}]", f"[{year_col}] = dest.[{year_col}]", f"[{month_col}] = dest.[{month_col}]"]
+                    delete_params = part_params + [col]
+
+                    if "week" in partition:
+                        delete_where.append("[week] = ?")
+                        delete_params.append(partition["week"])
+
+                    delete_sql = (
+                        f"DELETE FROM {full_output} "
+                        f"WHERE primary_key IN ("
+                        f"SELECT src.primary_key FROM {full_output} src "
+                        f"JOIN {full_dest} dest ON {join_clause} "
+                        f"WHERE {' AND '.join(where)}"
+                        f") AND [column] = ?"
+                    )
+
+                    debug_log(f"Prepared delete SQL: {delete_sql} | {tuple(params + [col])}", config, level="medium")
+                    cur.execute(delete_sql, tuple(params + [col]))
+                    conn.commit()
+
                 key = f"{partition['year']}-{partition['month']}" + (f"-{partition['week']}" if 'week' in partition else '')
                 summary[key]["updates"] += affected
                 summary[key]["columns"][col] += affected
@@ -130,4 +151,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
