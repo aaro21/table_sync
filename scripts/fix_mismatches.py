@@ -95,6 +95,16 @@ def fix_mismatches(config: Dict, *, dry_run: Optional[bool] = None) -> None:
 
                 if dry_run:
                     print(update_sql, tuple(params))
+
+                    delete_sql = (
+                        f"DELETE FROM {full_output} "
+                        f"WHERE primary_key IN ("
+                        f"SELECT src.primary_key FROM {full_output} src "
+                        f"JOIN {full_dest} dest ON {join_clause} "
+                        f"WHERE {' AND '.join(where)}"
+                        f") AND [column] = ?"
+                    )
+                    print(delete_sql, tuple(params + [col]))
                     affected = 0
                 else:
                     cur.execute(update_sql, tuple(params))
