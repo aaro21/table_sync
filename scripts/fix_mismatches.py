@@ -101,8 +101,8 @@ def fix_mismatches(config: Dict, *, dry_run: Optional[bool] = None) -> None:
                         f"WHERE primary_key IN ("
                         f"SELECT src.primary_key FROM {full_output} src "
                         f"JOIN {full_dest} dest ON {join_clause} "
-                        f"WHERE {' AND '.join(where)}"
-                        f") AND [column] = ?"
+                        f"WHERE {' AND '.join(where + [f'src.[column] = ?'])}"
+                        f")"
                     )
                     print(delete_sql, tuple(params + [col]))
                     affected = 0
