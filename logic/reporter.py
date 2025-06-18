@@ -31,7 +31,10 @@ class DiscrepancyWriter:
         self.columns = list(record.keys())
         cursor = self.conn.cursor()
         full_table = self._full_table()
-        column_defs = ", ".join(f"[{c}] NVARCHAR(MAX)" for c in self.columns)
+        column_defs = ", ".join(
+            f"[{c}] VARCHAR(500)" if c in ("primary_key", "column") else f"[{c}] VARCHAR(MAX)"
+            for c in self.columns
+        )
         create_sql = f"""
         IF OBJECT_ID('{full_table}', 'U') IS NULL
         BEGIN
@@ -56,15 +59,52 @@ class DiscrepancyWriter:
             return
         cursor = self.conn.cursor()
         full_table = self._full_table()
+        temp_table = "#temp_discrepancies"
+
         try:
-            for rec in self.buffer:
-                self._merge_records(cursor, full_table, [rec])
+            self._create_temp_table(cursor, temp_table)
+            self._bulk_insert_temp(cursor, temp_table, self.buffer)
+            self._merge_temp_into_target(cursor, temp_table, full_table)
             self.conn.commit()
-            debug_log(f"Merged {len(self.buffer)} rows into {full_table}", {}, level="low")
+            debug_log(f"Merged {len(self.buffer)} rows from temp into {full_table}", {}, level="low")
         except Exception as e:
             debug_log(f"Failed to merge rows into {full_table}: {e}", {}, level="high")
             raise
         self.buffer.clear()
+
+    def _create_temp_table(self, cursor, temp_table: str):
+        column_defs = ", ".join(
+            f"[{c}] VARCHAR(500)" if c in ("primary_key", "column") else f"[{c}] VARCHAR(MAX)"
+            for c in self.columns
+        )
+        cursor.execute(f"IF OBJECT_ID('tempdb..{temp_table}') IS NOT NULL DROP TABLE {temp_table}")
+        cursor.execute(f"CREATE TABLE {temp_table} ({column_defs})")
+
+    def _bulk_insert_temp(self, cursor, temp_table: str, records: List[Dict]):
+        insert_sql = f"INSERT INTO {temp_table} ({', '.join(f'[{c}]' for c in self.columns)}) VALUES ({', '.join('?' for _ in self.columns)})"
+        values = [[rec[c] for c in self.columns] for rec in records]
+        cursor.fast_executemany = True
+        cursor.executemany(insert_sql, values)
+        cursor.fast_executemany = False
+
+    def _merge_temp_into_target(self, cursor, temp_table: str, target_table: str):
+        key_cols = [c for c in ("primary_key", "column") if c in self.columns]
+        if not key_cols:
+            raise ValueError("Cannot merge without key columns")
+
+        on_clause = " AND ".join(f"target.[{c}] = source.[{c}]" for c in key_cols)
+        update_clause = ", ".join(f"target.[{c}] = source.[{c}]" for c in self.columns if c not in key_cols)
+        insert_cols = ", ".join(f"[{c}]" for c in self.columns)
+        insert_vals = ", ".join(f"source.[{c}]" for c in self.columns)
+
+        merge_sql = f"""
+        MERGE {target_table} AS target
+        USING {temp_table} AS source
+        ON {on_clause}
+        WHEN MATCHED THEN UPDATE SET {update_clause}
+        WHEN NOT MATCHED THEN INSERT ({insert_cols}) VALUES ({insert_vals});
+        """
+        cursor.execute(merge_sql)
 
     def _merge_records(self, cursor, full_table: str, records: List[Dict]):
         # Only treat these as key columns if they are present in the record. This
