@@ -50,98 +50,106 @@ def fix_mismatches(config: Dict, *, dry_run: Optional[bool] = None) -> None:
         cur = conn.cursor()
         summary: Dict[str, Dict] = defaultdict(lambda: {"updates": 0, "columns": defaultdict(int)})
 
-        partitions = list(get_partitions(config))
+        partitions = list(get_partitions(config)) or [{}]
         with tqdm(total=len(partitions), desc="partitions", unit="part") as part_bar:
             for partition in partitions:
                 part_bar.update(1)
-                part_params = [partition["year"], partition["month"]]
-                where_clauses = ["[type] = 'mismatch'", "[year] = ?", "[month] = ?"]
+                part_params = []
+                where_clauses = ["[type] = 'mismatch'"]
+                if partition.get("year"):
+                    part_params.append(partition["year"])
+                    where_clauses.append("[year] = ?")
+                if partition.get("month"):
+                    part_params.append(partition["month"])
+                    where_clauses.append("[month] = ?")
 
-            if "week" in partition:
-                part_params.append(partition["week"])
-                where_clauses.append("src.[week] = ?")
+                if partition.get("week"):
+                    part_params.append(partition["week"])
+                    where_clauses.append("src.[week] = ?")
 
-            debug_log(f"Processing partition {partition}", config, level="low")
+                debug_log(f"Processing partition {partition}", config, level="low")
 
-            cur.execute(
-                f"SELECT DISTINCT [column] FROM {full_output} WHERE {' AND '.join(where_clauses)}",
-                tuple(part_params),
-            )
-            columns_to_update = [row[0] for row in cur.fetchall()]
+                cur.execute(
+                    f"SELECT DISTINCT [column] FROM {full_output} WHERE {' AND '.join(where_clauses)}",
+                    tuple(part_params),
+                )
+                columns_to_update = [row[0] for row in cur.fetchall()]
 
-            with tqdm(columns_to_update, desc="columns", unit="col", leave=False) as col_bar:
-                for col in columns_to_update:
-                    dest_column = dest_cols.get(col, col)
+                with tqdm(columns_to_update, desc="columns", unit="col", leave=False) as col_bar:
+                    for col in columns_to_update:
+                        dest_column = dest_cols.get(col, col)
 
-                    join_on = [
-                        f"dest.[{pk_col}] = src.primary_key",
-                        f"dest.[{year_col}] = src.[year]",
-                        f"dest.[{month_col}] = src.[month]",
-                    ]
-                    if "week" in partition:
-                        week_key = config["partitioning"].get("week_column", "week")
-                        dest_week_col = dest_cols.get(week_key, week_key)
-                        join_on.append(f"dest.[{dest_week_col}] = src.[week]")
+                        join_on = [
+                            f"dest.[{pk_col}] = src.primary_key",
+                            f"dest.[{year_col}] = src.[year]",
+                            f"dest.[{month_col}] = src.[month]",
+                        ]
+                        if partition.get("week"):
+                            week_key = config["partitioning"].get("week_column", "week")
+                            dest_week_col = dest_cols.get(week_key, week_key)
+                            join_on.append(f"dest.[{dest_week_col}] = src.[week]")
 
-                    join_clause = " AND ".join(join_on)
+                        join_clause = " AND ".join(join_on)
 
-                    where = where_clauses + ["src.[column] = ?"]
-                    params = part_params + [col]
-                    if skip_nulls:
-                        where.append("src.source_value IS NOT NULL AND src.source_value <> ''")
+                        where = where_clauses + ["src.[column] = ?"]
+                        params = part_params + [col]
+                        if skip_nulls:
+                            where.append("src.source_value IS NOT NULL AND src.source_value <> ''")
 
-                    update_sql = (
-                        f"UPDATE dest SET dest.[{dest_column}] = src.source_value "
-                        f"FROM {full_dest} dest INNER JOIN {full_output} src ON {join_clause} "
-                        f"WHERE {' AND '.join(where)}"
-                    )
+                        update_sql = (
+                            f"UPDATE dest SET dest.[{dest_column}] = src.source_value "
+                            f"FROM {full_dest} dest INNER JOIN {full_output} src ON {join_clause} "
+                            f"WHERE {' AND '.join(where)}"
+                        )
 
-                    debug_log(f"Prepared update SQL: {update_sql} | {params}", config, level="medium")
+                        debug_log(f"Prepared update SQL: {update_sql} | {params}", config, level="medium")
 
-                    if dry_run:
-                        print(update_sql, tuple(params))
+                        if dry_run:
+                            print(update_sql, tuple(params))
+
+                            delete_sql = (
+                                f"DELETE FROM {full_output} "
+                                f"WHERE primary_key IN ("
+                                f"SELECT src.primary_key FROM {full_output} src "
+                                f"JOIN {full_dest} dest ON {join_clause} "
+                                f"WHERE {' AND '.join(where + [f'src.[column] = ?'])}"
+                                f")"
+                            )
+                            print(delete_sql, tuple(params + [col]))
+                            affected = 0
+                        else:
+                            cur.execute(update_sql, tuple(params))
+                            affected = cur.rowcount
+                            conn.commit()
+
+                        # Delete the updated records from the output table to prevent reprocessing
+                        delete_where = where_clauses + ["[column] = ?", f"[{pk_col}] = dest.[{pk_col}]", f"[{year_col}] = dest.[{year_col}]", f"[{month_col}] = dest.[{month_col}]"]
+                        delete_params = part_params + [col]
+
+                        if partition.get("week"):
+                            delete_where.append(f"[{dest_week_col}] = ?")
+                            delete_params.append(partition["week"])
 
                         delete_sql = (
                             f"DELETE FROM {full_output} "
                             f"WHERE primary_key IN ("
                             f"SELECT src.primary_key FROM {full_output} src "
                             f"JOIN {full_dest} dest ON {join_clause} "
-                            f"WHERE {' AND '.join(where + [f'src.[column] = ?'])}"
-                            f")"
+                            f"WHERE {' AND '.join(where)}"
+                            f") AND [column] = ?"
                         )
-                        print(delete_sql, tuple(params + [col]))
-                        affected = 0
-                    else:
-                        cur.execute(update_sql, tuple(params))
-                        affected = cur.rowcount
+
+                        debug_log(f"Prepared delete SQL: {delete_sql} | {tuple(params + [col])}", config, level="medium")
+                        cur.execute(delete_sql, tuple(params + [col]))
                         conn.commit()
 
-                    # Delete the updated records from the output table to prevent reprocessing
-                    delete_where = where_clauses + ["[column] = ?", f"[{pk_col}] = dest.[{pk_col}]", f"[{year_col}] = dest.[{year_col}]", f"[{month_col}] = dest.[{month_col}]"]
-                    delete_params = part_params + [col]
+                        col_bar.update(1)
 
-                    if "week" in partition:
-                        delete_where.append(f"[{dest_week_col}] = ?")
-                        delete_params.append(partition["week"])
-
-                    delete_sql = (
-                        f"DELETE FROM {full_output} "
-                        f"WHERE primary_key IN ("
-                        f"SELECT src.primary_key FROM {full_output} src "
-                        f"JOIN {full_dest} dest ON {join_clause} "
-                        f"WHERE {' AND '.join(where)}"
-                        f") AND [column] = ?"
-                    )
-
-                    debug_log(f"Prepared delete SQL: {delete_sql} | {tuple(params + [col])}", config, level="medium")
-                    cur.execute(delete_sql, tuple(params + [col]))
-                    conn.commit()
-
-                    col_bar.update(1)
-
-                    key = f"{partition['year']}-{partition['month']}" + (f"-{partition['week']}" if 'week' in partition else '')
-                    summary[key]["updates"] += affected
-                    summary[key]["columns"][col] += affected
+                        key = f"{partition.get('year', 'ALL')}-{partition.get('month', 'ALL')}"
+                        if partition.get('week'):
+                            key += f"-{partition['week']}"
+                        summary[key]["updates"] += affected
+                        summary[key]["columns"][col] += affected
 
         for part, info in summary.items():
             print(f"Partition: {part}")

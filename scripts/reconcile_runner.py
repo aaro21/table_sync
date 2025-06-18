@@ -4,6 +4,9 @@ import argparse
 from typing import Any
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
+import subprocess
+import os
+import json
 
 from logic.config_loader import load_config
 from connectors.oracle_connector import get_oracle_connection
@@ -25,6 +28,12 @@ def main():
     """Run the reconciliation process based on ``config/config.yaml``."""
 
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="config/config.yaml",
+        help="path to the config YAML file to use",
+    )
     parser.add_argument(
         "--debug",
         nargs="?",
@@ -48,7 +57,7 @@ def main():
     )
     args = parser.parse_args()
 
-    config = load_config()
+    config = load_config(config_path=args.config)
     if args.debug:
         config["debug"] = args.debug
     if args.limit:
@@ -244,6 +253,21 @@ def main():
                         # persisted even when ``compare_row_pairs`` yields no
                         # results for the current partition.
                     writer.flush()
+
+                    # Run fix_mismatches.py for this partition
+                    partition_env = {
+                        "PARTITION_YEAR": str(partition.get("year", "")),
+                        "PARTITION_MONTH": str(partition.get("month", "")),
+                        "PARTITION_WEEK": str(partition.get("week", "")),
+                    }
+
+                    debug_log(f"Running fix_mismatches.py for partition: {partition_env}", config, level="low")
+
+                    subprocess.run(
+                        ["python", "scripts/fix_mismatches.py", "--config", args.config],
+                        check=True,
+                        env={**os.environ, **partition_env},
+                    )
 
                 for pk, diff in sample:
                     debug_log(
