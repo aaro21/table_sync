@@ -121,7 +121,7 @@ def fix_mismatches(config: Dict, *, dry_run: Optional[bool] = None) -> None:
                     delete_params = part_params + [col]
 
                     if "week" in partition:
-                        delete_where.append("[week] = ?")
+                        delete_where.append(f"[{dest_week_col}] = ?")
                         delete_params.append(partition["week"])
 
                     delete_sql = (
