@@ -106,7 +106,7 @@ def _filter_pairs_by_hash(
     # Materialize chunks for tqdm progress bar
     chunks = list(_chunked(row_pairs, chunk_size))
     for i, chunk in enumerate(
-        tqdm(chunks, desc="Filtering hash mismatches", unit="chunk")
+        tqdm(chunks, desc="Filtering mismatched row hashes", unit="chunk")
     ):
         for pair in process(chunk, i):
             yield pair
