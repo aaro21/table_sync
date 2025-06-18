@@ -91,7 +91,10 @@ def main():
                     if config.get("output_mismatches"):
                         print(record)
 
-                def generate_pairs():
+                sample: list[tuple[Any, dict]] = []
+                seen_pks = set()
+                workers = config.get("comparison", {}).get("workers", 4)
+                with tqdm(desc="mismatched rows", unit="row") as pbar:
                     for partition in get_partitions(config):
                         debug_log(
                             f"Partition: {partition}",
@@ -150,82 +153,82 @@ def main():
 
                         total_rows = max(len(src_rows), len(dest_rows))
 
-                        with tqdm(total=total_rows, desc="processing rows", unit="row") as progress:
-                            while src_row is not None or dest_row is not None:
-                                if src_row is not None:
-                                    assert primary_key in src_row, f"Primary key '{primary_key}' missing in source row: {src_row}"
-                                if dest_row is not None:
-                                    assert primary_key in dest_row, f"Primary key '{primary_key}' missing in destination row: {dest_row}"
+                        def row_pairs():
+                            with tqdm(total=total_rows, desc="processing rows", unit="row") as progress:
+                                nonlocal src_row, dest_row
+                                while src_row is not None or dest_row is not None:
+                                    if src_row is not None:
+                                        assert primary_key in src_row, f"Primary key '{primary_key}' missing in source row: {src_row}"
+                                    if dest_row is not None:
+                                        assert primary_key in dest_row, f"Primary key '{primary_key}' missing in destination row: {dest_row}"
 
-                                src_key = src_row[primary_key] if src_row else None
-                                dest_key = dest_row[primary_key] if dest_row else None
+                                    src_key = src_row[primary_key] if src_row else None
+                                    dest_key = dest_row[primary_key] if dest_row else None
 
-                                if src_row and dest_row and src_key == dest_key:
-                                    yield (src_row, dest_row, src_cols, config, partition)
-                                    src_row = next(src_iter, None)
-                                    dest_row = next(dest_iter, None)
-                                elif dest_row is None or (src_row and src_key < dest_key):
+                                    if src_row and dest_row and src_key == dest_key:
+                                        yield (src_row, dest_row, src_cols, config, partition)
+                                        src_row = next(src_iter, None)
+                                        dest_row = next(dest_iter, None)
+                                    elif dest_row is None or (src_row and src_key < dest_key):
+                                        write_record({
+                                            "primary_key": src_key,
+                                            "type": "missing_in_dest",
+                                            "column": None,
+                                            "source_value": src_row,
+                                            "dest_value": None,
+                                            "year": partition["year"],
+                                            "month": partition["month"],
+                                            "week": partition.get("week"),
+                                        })
+                                        src_row = next(src_iter, None)
+                                    else:
+                                        write_record({
+                                            "primary_key": dest_key,
+                                            "type": "extra_in_dest",
+                                            "column": None,
+                                            "source_value": None,
+                                            "dest_value": dest_row,
+                                            "year": partition["year"],
+                                            "month": partition["month"],
+                                            "week": partition.get("week"),
+                                        })
+                                        dest_row = next(dest_iter, None)
+
+                                    progress.update(1)
+
+                        for result in compare_row_pairs(
+                            row_pairs(),
+                            workers=workers,
+                            progress=pbar,
+                        ):
+                            debug_log(f"Compare result: {result}", config, level="low")
+                            src_key = result["primary_key"]
+                            part = result.get("partition", {})
+                            if result["mismatches"]:
+                                if src_key not in seen_pks and len(sample) < 2:
+                                    sample.append((src_key, result["mismatches"][0]))
+                                    seen_pks.add(src_key)
+                                for diff in result["mismatches"]:
                                     write_record({
                                         "primary_key": src_key,
-                                        "type": "missing_in_dest",
-                                        "column": None,
-                                        "source_value": src_row,
-                                        "dest_value": None,
-                                        "year": partition["year"],
-                                        "month": partition["month"],
-                                        "week": partition.get("week"),
+                                        "type": "mismatch",
+                                        "column": diff["column"],
+                                        "source_value": diff["source_value"],
+                                        "dest_value": diff["dest_value"],
+                                        **(
+                                            {
+                                                "source_hash": diff.get("source_hash"),
+                                                "dest_hash": diff.get("dest_hash"),
+                                            }
+                                            if use_row_hash
+                                            else {}
+                                        ),
+                                        "year": part.get("year"),
+                                        "month": part.get("month"),
+                                        "week": part.get("week"),
                                     })
-                                    src_row = next(src_iter, None)
-                                else:
-                                    write_record({
-                                        "primary_key": dest_key,
-                                        "type": "extra_in_dest",
-                                        "column": None,
-                                        "source_value": None,
-                                        "dest_value": dest_row,
-                                        "year": partition["year"],
-                                        "month": partition["month"],
-                                        "week": partition.get("week"),
-                                    })
-                                    dest_row = next(dest_iter, None)
+                        writer.flush()
 
-                                progress.update(1)
-
-                sample: list[tuple[Any, dict]] = []
-                seen_pks = set()
-                workers = config.get("comparison", {}).get("workers", 4)
-                with tqdm(desc="mismatched rows", unit="row") as pbar:
-                    for result in compare_row_pairs(
-                        generate_pairs(),
-                        workers=workers,
-                        progress=pbar,
-                    ):
-                        debug_log(f"Compare result: {result}", config, level="low")
-                        src_key = result["primary_key"]
-                        part = result.get("partition", {})
-                        if result["mismatches"]:
-                            if src_key not in seen_pks and len(sample) < 2:
-                                sample.append((src_key, result["mismatches"][0]))
-                                seen_pks.add(src_key)
-                            for diff in result["mismatches"]:
-                                write_record({
-                                    "primary_key": src_key,
-                                    "type": "mismatch",
-                                    "column": diff["column"],
-                                    "source_value": diff["source_value"],
-                                    "dest_value": diff["dest_value"],
-                                    **(
-                                        {
-                                            "source_hash": diff.get("source_hash"),
-                                            "dest_hash": diff.get("dest_hash"),
-                                        }
-                                        if use_row_hash
-                                        else {}
-                                    ),
-                                    "year": part.get("year"),
-                                    "month": part.get("month"),
-                                    "week": part.get("week"),
-                                })
                 for pk, diff in sample:
                     debug_log(
                         f"Sample mismatch PK {pk}, column {diff['column']}: {diff['source_value']} -> {diff['dest_value']}",

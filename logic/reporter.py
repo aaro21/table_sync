@@ -67,8 +67,21 @@ class DiscrepancyWriter:
         self.buffer.clear()
 
     def _merge_records(self, cursor, full_table: str, records: List[Dict]):
-        key_cols = ["primary_key", "column"]  # Composite key
+        # Only treat these as key columns if they are present in the record. This
+        # allows ``DiscrepancyWriter`` to be used with arbitrary schemas in
+        # tests or one-off scripts where ``primary_key``/``column`` fields may be
+        # absent. If no key columns are available we fall back to a simple
+        # ``INSERT`` statement.
+        key_cols = [c for c in ("primary_key", "column") if c in self.columns]
+
         for rec in records:
+            if not key_cols:
+                insert_cols = ", ".join(f"[{col}]" for col in self.columns)
+                insert_vals = ", ".join("?" for _ in self.columns)
+                insert_sql = f"INSERT INTO {full_table} ({insert_cols}) VALUES ({insert_vals})"
+                cursor.execute(insert_sql, [rec[col] for col in self.columns])
+                continue
+
             update_set = ", ".join(f"[{col}] = ?" for col in self.columns if col not in key_cols)
             insert_cols = ", ".join(f"[{col}]" for col in self.columns)
             insert_vals = ", ".join("?" for _ in self.columns)
