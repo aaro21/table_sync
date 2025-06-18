@@ -3,6 +3,7 @@
 import argparse
 from typing import Any
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 
 from logic.config_loader import load_config
 from connectors.oracle_connector import get_oracle_connection
@@ -94,8 +95,10 @@ def main():
                 sample: list[tuple[Any, dict]] = []
                 seen_pks = set()
                 workers = config.get("comparison", {}).get("workers", 4)
-                with tqdm(desc="mismatches found", unit="row") as pbar:
-                    for partition in get_partitions(config):
+                partitions = list(get_partitions(config))
+                with tqdm(total=len(partitions), desc="partitions", unit="part") as partbar, tqdm(desc="mismatches found", unit="row") as pbar:
+                    for partition in partitions:
+                        partbar.update(1)
                         debug_log(
                             f"Partition: {partition}",
                             config,
@@ -154,7 +157,13 @@ def main():
                         total_rows = max(len(src_rows), len(dest_rows))
 
                         def row_pairs():
-                            with tqdm(total=total_rows, desc="processing row pairs", unit="row") as progress:
+                            use_bar = total_rows <= 1000
+                            bar_ctx = (
+                                tqdm(total=total_rows, desc="processing row pairs", unit="row")
+                                if use_bar
+                                else nullcontext()
+                            )
+                            with bar_ctx as progress:
                                 nonlocal src_row, dest_row
                                 while src_row is not None or dest_row is not None:
                                     if src_row is not None:
@@ -194,7 +203,8 @@ def main():
                                         })
                                         dest_row = next(dest_iter, None)
 
-                                    progress.update(1)
+                                    if use_bar:
+                                        progress.update(1)
 
                         for result in compare_row_pairs(
                             row_pairs(),
