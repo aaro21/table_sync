@@ -4,6 +4,7 @@ import csv
 import os
 from typing import Iterable, List, Dict, Any
 from utils.logger import debug_log
+
 try:
     import pyodbc
 except Exception:  # pragma: no cover - optional dependency
@@ -29,12 +30,16 @@ class DiscrepancyWriter:
         if self.prepared:
             return
         self.columns = list(record.keys())
-        column_defs = ", ".join(
-            f"[{c}] VARCHAR(500)" if c in ("primary_key", "column") else f"[{c}] VARCHAR(MAX)"
-            for c in self.columns
-        ) + ", [record_insert_datetime] DATETIME DEFAULT GETDATE()"
         cursor = self.conn.cursor()
         full_table = self._full_table()
+        column_defs = ", ".join(
+            (
+                f"[{c}] VARCHAR(500)"
+                if c in ("primary_key", "column")
+                else f"[{c}] VARCHAR(MAX)"
+            )
+            for c in self.columns
+        )
         create_sql = f"""
         IF OBJECT_ID('{full_table}', 'U') IS NULL
         BEGIN
@@ -62,33 +67,38 @@ class DiscrepancyWriter:
         temp_table = "#temp_discrepancies"
 
         try:
-            self._create_temp_table(cursor, temp_table)
-            self._bulk_insert_temp(cursor, temp_table, self.buffer)
-            self._merge_temp_into_target(cursor, temp_table, full_table)
+            if any(c in self.columns for c in ("primary_key", "column")):
+                self._create_temp_table(cursor, temp_table)
+                self._bulk_insert_temp(cursor, temp_table, self.buffer)
+                self._merge_temp_into_target(cursor, temp_table, full_table)
+            else:
+                self._merge_records(cursor, full_table, self.buffer)
             self.conn.commit()
-            debug_log(f"Merged {len(self.buffer)} rows from temp into {full_table}", {}, level="low")
+            debug_log(
+                f"Merged {len(self.buffer)} rows from temp into {full_table}",
+                {},
+                level="low",
+            )
         except Exception as e:
             debug_log(f"Failed to merge rows into {full_table}: {e}", {}, level="high")
             raise
         self.buffer.clear()
 
     def _create_temp_table(self, cursor, temp_table: str):
-        if "record_insert_datetime" not in self.columns:
-            self.columns.append("record_insert_datetime")
         column_defs = ", ".join(
-            f"[{c}] VARCHAR(500)" if c in ("primary_key", "column") else f"[{c}] VARCHAR(MAX)"
+            (
+                f"[{c}] VARCHAR(500)"
+                if c in ("primary_key", "column")
+                else f"[{c}] VARCHAR(MAX)"
+            )
             for c in self.columns
         )
-        cursor.execute(f"IF OBJECT_ID('tempdb..{temp_table}') IS NOT NULL DROP TABLE {temp_table}")
+        cursor.execute(
+            f"IF OBJECT_ID('tempdb..{temp_table}') IS NOT NULL DROP TABLE {temp_table}"
+        )
         cursor.execute(f"CREATE TABLE {temp_table} ({column_defs})")
 
     def _bulk_insert_temp(self, cursor, temp_table: str, records: List[Dict]):
-        from datetime import datetime
-        if "record_insert_datetime" not in self.columns:
-            self.columns.append("record_insert_datetime")
-        for rec in records:
-            if "record_insert_datetime" not in rec:
-                rec["record_insert_datetime"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         insert_sql = f"INSERT INTO {temp_table} ({', '.join(f'[{c}]' for c in self.columns)}) VALUES ({', '.join('?' for _ in self.columns)})"
         values = [[rec[c] for c in self.columns] for rec in records]
         cursor.fast_executemany = True
@@ -101,8 +111,9 @@ class DiscrepancyWriter:
             raise ValueError("Cannot merge without key columns")
 
         on_clause = " AND ".join(f"target.[{c}] = source.[{c}]" for c in key_cols)
-        update_cols = [c for c in self.columns if c not in key_cols]
-        update_clause = ", ".join(f"target.[{c}] = source.[{c}]" for c in update_cols)
+        update_clause = ", ".join(
+            f"target.[{c}] = source.[{c}]" for c in self.columns if c not in key_cols
+        )
         insert_cols = ", ".join(f"[{c}]" for c in self.columns)
         insert_vals = ", ".join(f"source.[{c}]" for c in self.columns)
 
@@ -127,15 +138,21 @@ class DiscrepancyWriter:
             if not key_cols:
                 insert_cols = ", ".join(f"[{col}]" for col in self.columns)
                 insert_vals = ", ".join("?" for _ in self.columns)
-                insert_sql = f"INSERT INTO {full_table} ({insert_cols}) VALUES ({insert_vals})"
+                insert_sql = (
+                    f"INSERT INTO {full_table} ({insert_cols}) VALUES ({insert_vals})"
+                )
                 cursor.execute(insert_sql, [rec[col] for col in self.columns])
                 continue
 
-            update_set = ", ".join(f"[{col}] = ?" for col in self.columns if col not in key_cols)
+            update_set = ", ".join(
+                f"[{col}] = ?" for col in self.columns if col not in key_cols
+            )
             insert_cols = ", ".join(f"[{col}]" for col in self.columns)
             insert_vals = ", ".join("?" for _ in self.columns)
 
-            on_clause = " AND ".join(f"target.[{col}] = source.[{col}]" for col in key_cols)
+            on_clause = " AND ".join(
+                f"target.[{col}] = source.[{col}]" for col in key_cols
+            )
             using_select = ", ".join(f"? AS [{col}]" for col in key_cols)
 
             merge_sql = f"""
@@ -147,7 +164,11 @@ class DiscrepancyWriter:
             WHEN NOT MATCHED THEN
                 INSERT ({insert_cols}) VALUES ({insert_vals});
             """
-            values = [rec[col] for col in key_cols] + [rec[col] for col in self.columns if col not in key_cols] + [rec[col] for col in self.columns]
+            values = (
+                [rec[col] for col in key_cols]
+                + [rec[col] for col in self.columns if col not in key_cols]
+                + [rec[col] for col in self.columns]
+            )
             cursor.execute(merge_sql, values)
 
     def close(self):
@@ -174,7 +195,7 @@ def write_discrepancies_to_csv(discrepancies: Iterable[Dict], output_path: str):
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-    with open(output_path, mode='w', newline='', encoding='utf-8') as f:
+    with open(output_path, mode="w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=discrepancies[0].keys())
         writer.writeheader()
         writer.writerows(discrepancies)
