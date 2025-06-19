@@ -57,7 +57,7 @@ def main():
     )
     args = parser.parse_args()
 
-    config = load_config(config_path=args.config)
+    config = load_config(args.config)
     if args.debug:
         config["debug"] = args.debug
     if args.limit:

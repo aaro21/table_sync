@@ -5,6 +5,11 @@ import os
 from typing import Iterable, List, Dict, Any
 from utils.logger import debug_log
 
+# Suppress dateutil UnknownTimezoneWarning globally
+import warnings
+from dateutil.parser import UnknownTimezoneWarning
+warnings.filterwarnings("ignore", category=UnknownTimezoneWarning)
+
 try:
     import pyodbc
 except Exception:  # pragma: no cover - optional dependency
