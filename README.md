@@ -66,6 +66,9 @@ python scripts/reconcile_runner.py --record 12345
 Row comparison can optionally use a row hash to skip columns when the
 source and destination rows are identical. Parallel comparison across
 partitions is also supported when enabled in the YAML config.
+When row hashing is enabled you can set ``comparison.aggressive_memory_cleanup``
+to ``true`` to discard matching rows immediately after hashing, reducing memory
+usage on large tables.
 When weekly partitions are defined for a month, all weeks are processed
 concurrently. Queries for the next week wait until the previous week's
 fetch has completed so database load is staggered.

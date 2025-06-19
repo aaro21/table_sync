@@ -15,7 +15,7 @@ from connectors.oracle_connector import get_oracle_connection
 from connectors.sqlserver_connector import get_sqlserver_connection
 from logic.partitioner import get_partitions
 from runners.reconcile import fetch_rows
-from logic.comparator import compare_row_pairs
+from logic.comparator import compare_row_pairs, discard_matching_rows_by_hash
 from logic.reporter import DiscrepancyWriter
 from utils.logger import debug_log
 from utils import format_partition
@@ -112,6 +112,22 @@ def process_partition(
             config,
             level="medium",
         )
+
+        comparison_cfg = config.get("comparison", {})
+        if use_row_hash and comparison_cfg.get("aggressive_memory_cleanup"):
+            src_rows, dest_rows, discarded, kept = discard_matching_rows_by_hash(
+                src_rows,
+                dest_rows,
+                primary_key,
+                workers=workers,
+                mode=comparison_cfg.get("parallel_mode", "thread"),
+                config=config,
+            )
+            debug_log(
+                f"Discarded {discarded} matching rows, {kept} remain for comparison",
+                config,
+                level="medium",
+            )
 
         with DiscrepancyWriter(dest_conn, output_schema, output_table) as writer:
 

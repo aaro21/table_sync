@@ -70,6 +70,52 @@ def _hash_pair(pair: tuple) -> tuple[str, str]:
     return compute_row_hash(src_row), compute_row_hash(dest_row)
 
 
+def discard_matching_rows_by_hash(
+    src_rows: list[dict],
+    dest_rows: list[dict],
+    primary_key: str,
+    *,
+    workers: int = 4,
+    mode: str = "thread",
+    config: dict | None = None,
+) -> tuple[list[dict], list[dict], int, int]:
+    """Return filtered row lists with matching hashes removed."""
+
+    source_by_pk = {row[primary_key]: row for row in src_rows}
+    dest_by_pk = {row[primary_key]: row for row in dest_rows}
+
+    intersect = sorted(set(source_by_pk) & set(dest_by_pk))
+    if not intersect:
+        return src_rows, dest_rows, 0, 0
+
+    debug_log(
+        f"Hashing {len(intersect)} intersecting rows for cleanup",
+        config,
+        level="medium",
+    )
+
+    src_hashes = compute_row_hashes_parallel(
+        [source_by_pk[k] for k in intersect], workers=workers, mode=mode
+    )
+    dest_hashes = compute_row_hashes_parallel(
+        [dest_by_pk[k] for k in intersect], workers=workers, mode=mode
+    )
+
+    discarded = 0
+    for pk, s_h, d_h in zip(intersect, src_hashes, dest_hashes):
+        if s_h == d_h:
+            source_by_pk.pop(pk, None)
+            dest_by_pk.pop(pk, None)
+            discarded += 1
+
+    kept = len(intersect) - discarded
+
+    filtered_src = sorted(source_by_pk.values(), key=lambda r: r[primary_key])
+    filtered_dest = sorted(dest_by_pk.values(), key=lambda r: r[primary_key])
+
+    return filtered_src, filtered_dest, discarded, kept
+
+
 def _chunked(iterable: Iterable, size: int) -> Iterable[list]:
     """Yield lists of *size* elements from *iterable*."""
     it = iter(iterable)
