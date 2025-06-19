@@ -3,6 +3,7 @@
 import argparse
 from typing import Any
 from concurrent.futures import ThreadPoolExecutor
+from pqdm.processes import pqdm
 from contextlib import nullcontext
 import subprocess
 import sys
