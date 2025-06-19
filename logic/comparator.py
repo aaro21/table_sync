@@ -468,6 +468,10 @@ def compare_row_pairs_serial(
         )
         yield result
 
+    # Explicitly free memory from large structures
+    del df_src, df_dest, mismatches
+    gc.collect()
+
 
 def compare_row_pairs_parallel_detailed(
     row_pairs: Iterable[tuple],
@@ -506,42 +510,37 @@ def compare_row_pairs_parallel_detailed(
         progress.total = total
         progress.refresh()
 
-    def _prepare(item: tuple) -> tuple:
-        if len(item) == 4:
-            src_row, dest_row, col_map, config = item
-            part = None
-        else:
-            src_row, dest_row, col_map, config, part = item
-        return src_row, dest_row, col_map, config, part
-
-    prepared_row_pairs = []
-    for item in row_pairs:
-        src_row, dest_row, col_map, config, part = _prepare(item)
-        cfg_ref = cfg_ref or config
-        cols = [
-            c
-            for c in col_map.keys()
-            if not config.get("comparison", {}).get("only_columns")
-            or c in config["comparison"]["only_columns"]
-        ]
-        prepared_row_pairs.append(
-            {
+    def prepare_row_pairs_generator():
+        nonlocal cfg_ref
+        for item in row_pairs:
+            if len(item) == 4:
+                src_row, dest_row, col_map, config = item
+                part = None
+            else:
+                src_row, dest_row, col_map, config, part = item
+            cfg_ref = cfg_ref or config
+            cols = [
+                c
+                for c in col_map.keys()
+                if not config.get("comparison", {}).get("only_columns")
+                or c in config["comparison"]["only_columns"]
+            ]
+            yield {
                 "src_row": src_row,
                 "dest_row": dest_row,
                 "columns": cols,
                 "config": config,
                 "partition": part,
             }
-        )
 
-    if progress is not None and total is None:
-        progress.total = len(prepared_row_pairs)
-        progress.refresh()
+    # If progress is not None and total is None, try to estimate total
+    # This is not possible without materializing, so skip.
 
     executor_cls = ThreadPoolExecutor if parallel_mode == "thread" else ProcessPoolExecutor
     with executor_cls(max_workers=workers) as executor:
         futures = [
-            executor.submit(compare_row_pair_by_pk, **kwargs) for kwargs in prepared_row_pairs
+            executor.submit(compare_row_pair_by_pk, **kwargs)
+            for kwargs in prepare_row_pairs_generator()
         ]
 
         for future in as_completed(futures):
@@ -554,6 +553,9 @@ def compare_row_pairs_parallel_detailed(
                     progress.refresh()
             if result:
                 yield result
+
+    # Explicitly free memory from large structures if any
+    gc.collect()
 
 
 def compare_row_pairs_parallel_batch(
