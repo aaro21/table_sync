@@ -7,8 +7,9 @@ from datetime import datetime
 
 from typing import Any, Iterable, Optional, Tuple, List
 import xxhash
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 from itertools import islice, chain
+from pqdm.processes import pqdm
+from pqdm.threads import pqdm as pqdm_threads
 
 from dateutil import parser
 
@@ -52,10 +53,15 @@ def compute_row_hashes_parallel(
     rows: list[dict], *, workers: int = 4, mode: str = "thread"
 ) -> list[str]:
     """Compute hashes for rows in parallel using thread or process mode."""
-    Executor = ThreadPoolExecutor if mode == "thread" else ProcessPoolExecutor
-    debug_log(f"Using {Executor.__name__} for parallel hashing", None, level="high")
-    with Executor(max_workers=workers) as executor:
-        return list(executor.map(_hash_row, rows))
+    pq = pqdm_threads if mode == "thread" else pqdm
+    debug_log(
+        f"Using {'threads' if mode == 'thread' else 'processes'} for parallel hashing",
+        None,
+        level="high",
+    )
+    return list(
+        pq(rows, n_jobs=workers, function=_hash_row, desc="Hashing rows", disable=True)
+    )
 
 
 def _hash_pair(pair: tuple) -> tuple[str, str]:
@@ -454,46 +460,48 @@ def compare_row_pairs_parallel_detailed(
             src_row, dest_row, col_map, config, part = item
         return src_row, dest_row, col_map, config, part
 
-    Executor = ThreadPoolExecutor if parallel_mode == "thread" else ProcessPoolExecutor
-    tasks = []
-    with Executor(max_workers=workers) as executor:
-        for item in row_pairs:
-            src_row, dest_row, col_map, config, part = _prepare(item)
-            cfg_ref = cfg_ref or config
-            cols = list(col_map.keys())
-            only_cols = config.get("comparison", {}).get("only_columns")
-            if only_cols:
-                cols = [c for c in cols if c in only_cols]
-            src_hashes, dest_hashes = compute_row_hashes_parallel(
-                [src_row, dest_row], workers=2, mode=parallel_mode
-            )
-            src_hash, dest_hash = src_hashes[0], dest_hashes[1]
-            tasks.append(
-                executor.submit(
-                    compare_row_pair_by_pk,
-                    src_row,
-                    dest_row,
-                    cols,
-                    config,
-                    partition=part,
-                    hashes=(src_hash, dest_hash),
-                )
-            )
+    prepared_row_pairs = []
+    for item in row_pairs:
+        src_row, dest_row, col_map, config, part = _prepare(item)
+        cfg_ref = cfg_ref or config
+        cols = [
+            c
+            for c in col_map.keys()
+            if not config.get("comparison", {}).get("only_columns")
+            or c in config["comparison"]["only_columns"]
+        ]
+        prepared_row_pairs.append(
+            {
+                "src_row": src_row,
+                "dest_row": dest_row,
+                "columns": cols,
+                "config": config,
+                "partition": part,
+            }
+        )
 
-        if progress is not None and total is None:
-            progress.total = len(tasks)
-            progress.refresh()
+    if progress is not None and total is None:
+        progress.total = len(prepared_row_pairs)
+        progress.refresh()
 
-        for fut in as_completed(tasks):
-            result = fut.result()
-            if progress is not None:
-                if hasattr(progress, "update"):
-                    progress.update(1)
-                else:
-                    progress.n += 1
-                    progress.refresh()
-            if result:
-                yield result
+    results = pqdm(
+        prepared_row_pairs,
+        n_jobs=workers,
+        function=compare_row_pair_by_pk,
+        argument_type="kwargs",
+        desc="Comparing row pairs",
+        disable=progress is not None,
+    )
+
+    for result in results:
+        if progress is not None:
+            if hasattr(progress, "update"):
+                progress.update(1)
+            else:
+                progress.n += 1
+                progress.refresh()
+        if result:
+            yield result
 
 
 def compare_row_pairs_parallel_batch(
