@@ -264,7 +264,7 @@ def main():
                     debug_log(f"Running fix_mismatches.py for partition: {partition_env}", config, level="low")
 
                     subprocess.run(
-                        ["python", "scripts/fix_mismatches.py", "--config", args.config],
+                        ["python", "scripts/fix_mismatches.py", "--config-path", args.config],
                         check=True,
                         env={**os.environ, **partition_env},
                     )

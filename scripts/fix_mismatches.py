@@ -15,7 +15,7 @@ from utils.logger import debug_log
 from tqdm import tqdm
 
 
-
+# Note: record_insert_datetime is managed during initial load, not needed during fix phase.
 
 def fix_mismatches(config: Dict, *, dry_run: Optional[bool] = None) -> None:
     """Apply or print updates for mismatched rows using set-based joins."""
@@ -43,8 +43,8 @@ def fix_mismatches(config: Dict, *, dry_run: Optional[bool] = None) -> None:
     year_col = dest_cols.get(year_logical, year_logical)
     month_col = dest_cols.get(month_logical, month_logical)
 
-    full_dest = f"{dest_schema}.{dest_table}" if dest_schema else dest_table
-    full_output = f"{output_schema}.{output_table}" if output_schema else output_table
+    full_dest = f"[{dest_schema}].[{dest_table}]" if dest_schema else f"[{dest_table}]"
+    full_output = f"[{output_schema}].[{output_table}]" if output_schema else f"[{output_table}]"
 
     with get_sqlserver_connection(dest_env, config) as conn:
         cur = conn.cursor()
@@ -118,30 +118,28 @@ def fix_mismatches(config: Dict, *, dry_run: Optional[bool] = None) -> None:
                             print(delete_sql, tuple(params + [col]))
                             affected = 0
                         else:
-                            cur.execute(update_sql, tuple(params))
-                            affected = cur.rowcount
-                            conn.commit()
+                            try:
+                                cur.execute(update_sql, tuple(params))
+                                affected = cur.rowcount
+                                conn.commit()
+                            except Exception as e:
+                                debug_log(f"Error executing update: {e}", config, level="low")
+                                continue
 
                         # Delete the updated records from the output table to prevent reprocessing
-                        delete_where = where_clauses + ["[column] = ?", f"[{pk_col}] = dest.[{pk_col}]", f"[{year_col}] = dest.[{year_col}]", f"[{month_col}] = dest.[{month_col}]"]
-                        delete_params = part_params + [col]
-
-                        if partition.get("week"):
-                            delete_where.append(f"[{dest_week_col}] = ?")
-                            delete_params.append(partition["week"])
-
                         delete_sql = (
-                            f"DELETE FROM {full_output} "
-                            f"WHERE primary_key IN ("
-                            f"SELECT src.primary_key FROM {full_output} src "
-                            f"JOIN {full_dest} dest ON {join_clause} "
-                            f"WHERE {' AND '.join(where)}"
-                            f") AND [column] = ?"
+                            f"DELETE src FROM {full_output} src "
+                            f"INNER JOIN {full_dest} dest ON {join_clause} "
+                            f"WHERE {' AND '.join(where)} AND src.[column] = ?"
                         )
 
-                        debug_log(f"Prepared delete SQL: {delete_sql} | {tuple(params + [col])}", config, level="medium")
-                        cur.execute(delete_sql, tuple(params + [col]))
-                        conn.commit()
+                        try:
+                            debug_log(f"Prepared delete SQL: {delete_sql} | {tuple(params + [col])}", config, level="medium")
+                            cur.execute(delete_sql, tuple(params + [col]))
+                            conn.commit()
+                        except Exception as e:
+                            debug_log(f"Error executing delete: {e}", config, level="low")
+                            continue
 
                         col_bar.update(1)
 
@@ -162,14 +160,11 @@ def main() -> None:
     """Command line wrapper around :func:`fix_mismatches`."""
 
     parser = argparse.ArgumentParser(description="Apply fixes for mismatched rows")
-    parser.add_argument("--apply", action="store_true", help="execute updates")
-    parser.add_argument("--no-dry-run", dest="dry_run", action="store_false", help="disable dry run")
+    parser.add_argument("--apply", action="store_true", help="execute updates instead of dry run")
     args = parser.parse_args()
 
     config = load_config()
-    dry_run = args.dry_run
-    if args.apply:
-        dry_run = False
+    dry_run = not args.apply
 
     fix_mismatches(config, dry_run=dry_run)
 
