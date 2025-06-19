@@ -9,6 +9,8 @@ import subprocess
 import sys
 import os
 import json
+from datetime import datetime
+import time
 
 from logic.config_loader import load_config
 from connectors.oracle_connector import get_oracle_connection
@@ -63,7 +65,14 @@ def process_partition(
     """Process a single partition using its own database connections."""
 
     start_event.wait()
-    pbar.set_description(f"mismatches {format_partition(partition)}")
+    part_label = format_partition(partition)
+    debug_log(
+        f"Partition {part_label} started at {datetime.now().isoformat()}",
+        config,
+        level="low",
+    )
+    part_start = time.perf_counter()
+    pbar.set_description(f"mismatches {part_label}")
     with get_oracle_connection(src_env, config) as src_conn, get_sqlserver_connection(dest_env, config) as dest_conn:
         dest_conn.cursor().fast_executemany = True
         with ThreadPoolExecutor(max_workers=2) as executor:
@@ -258,6 +267,12 @@ def process_partition(
         os.environ.clear()
         os.environ.update(original_environ)
 
+    debug_log(
+        f"Partition {part_label} finished in {time.perf_counter() - part_start:.2f}s",
+        config,
+        level="low",
+    )
+
 
 def main():
     """Run the reconciliation process based on ``config/config.yaml``."""
@@ -302,6 +317,13 @@ def main():
     if args.record:
         config["record_pk"] = args.record
 
+    run_start_dt = datetime.now()
+    run_start = time.perf_counter()
+    debug_log(
+        f"Process started at {run_start_dt.isoformat()}",
+        config,
+        level="low",
+    )
     debug_log("Starting reconciliation run", config, level="low")
 
     comparison_cfg = config.get("comparison", {})
@@ -390,6 +412,13 @@ def main():
             )
 
         debug_log("Reconciliation complete", config, level="low")
+        run_end_dt = datetime.now()
+        elapsed = time.perf_counter() - run_start
+        debug_log(
+            f"Process finished at {run_end_dt.isoformat()}, elapsed {elapsed:.2f}s",
+            config,
+            level="low",
+        )
 
     except Exception as exc:  # pragma: no cover - runtime failure
         debug_log(f"Reconciliation failed: {exc}", config, level="low")
