@@ -10,6 +10,11 @@ import xxhash
 from itertools import islice, chain
 from pqdm.processes import pqdm
 from pqdm.threads import pqdm as pqdm_threads
+from concurrent.futures import (
+    ThreadPoolExecutor,
+    ProcessPoolExecutor,
+    as_completed,
+)
 
 from dateutil import parser
 
@@ -530,24 +535,22 @@ def compare_row_pairs_parallel_detailed(
         progress.total = len(prepared_row_pairs)
         progress.refresh()
 
-    results = pqdm(
-        prepared_row_pairs,
-        n_jobs=workers,
-        function=compare_row_pair_by_pk,
-        argument_type="kwargs",
-        desc="Comparing row pairs",
-        disable=progress is not None,
-    )
+    executor_cls = ThreadPoolExecutor if parallel_mode == "thread" else ProcessPoolExecutor
+    with executor_cls(max_workers=workers) as executor:
+        futures = [
+            executor.submit(compare_row_pair_by_pk, **kwargs) for kwargs in prepared_row_pairs
+        ]
 
-    for result in results:
-        if progress is not None:
-            if hasattr(progress, "update"):
-                progress.update(1)
-            else:
-                progress.n += 1
-                progress.refresh()
-        if result:
-            yield result
+        for future in as_completed(futures):
+            result = future.result()
+            if progress is not None:
+                if hasattr(progress, "update"):
+                    progress.update(1)
+                else:
+                    progress.n += 1
+                    progress.refresh()
+            if result:
+                yield result
 
 
 def compare_row_pairs_parallel_batch(
