@@ -255,31 +255,34 @@ def main():
                         # mismatches detected during ``row_pairs`` iteration are
                         # persisted even when ``compare_row_pairs`` yields no
                         # results for the current partition.
-                    writer.flush()
+                        writer.flush()
 
-                    # Run fix_mismatches.py for this partition
-                    partition_env = {
-                        "PARTITION_YEAR": str(partition.get("year", "")),
-                        "PARTITION_MONTH": str(partition.get("month", "")),
-                        "PARTITION_WEEK": str(partition.get("week", "")),
-                    }
+                        # Run fix_mismatches.py for this partition
+                        partition_env = {
+                            "PARTITION_YEAR": str(partition.get("year", "")),
+                            "PARTITION_MONTH": str(partition.get("month", "")),
+                            "PARTITION_WEEK": str(partition.get("week", "")),
+                        }
 
-                    debug_log(f"Running fix_mismatches.py for partition: {partition_env}", config, level="low")
-                    
-                    # Directly call fix_mismatches.py main function with appropriate environment and sys.argv
-                    original_environ = os.environ.copy()
-                    os.environ.update(partition_env)
+                        debug_log(
+                            f"Running fix_mismatches.py for partition: {partition_env}",
+                            config,
+                            level="low",
+                        )
 
-                    sys.argv = [
-                        "fix_mismatches",
-                        "--config-path",
-                        args.config,
-                    ]
+                        # Directly call fix_mismatches.py main function with appropriate environment and sys.argv
+                        original_environ = os.environ.copy()
+                        os.environ.update(partition_env)
 
-                    fix_mismatches_main()
+                        sys.argv = [
+                            "fix_mismatches",
+                            "--apply",
+                        ]
 
-                    os.environ.clear()
-                    os.environ.update(original_environ)
+                        fix_mismatches_main()
+
+                        os.environ.clear()
+                        os.environ.update(original_environ)
 
                 for pk, diff in sample:
                     debug_log(
