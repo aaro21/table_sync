@@ -77,7 +77,12 @@ def fix_mismatches(config: Dict, *, dry_run: Optional[bool] = None) -> None:
                 )
                 columns_to_update = [row[0] for row in cur.fetchall()]
 
-                with tqdm(columns_to_update, desc="columns", unit="col", leave=False) as col_bar:
+                with tqdm(
+                    columns_to_update,
+                    desc=f"{format_partition(partition)} columns",
+                    unit="col",
+                    leave=False,
+                ) as col_bar:
                     col_bar.set_postfix_str(format_partition(partition))
                     for col in columns_to_update:
                         dest_column = dest_cols.get(col, col)

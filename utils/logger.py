@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 
 def _get_config_level(config: dict | None) -> str:
     """Return the configured debug level from *config*."""
@@ -18,9 +20,13 @@ def _get_config_level(config: dict | None) -> str:
     return "low"
 
 
+LOG_FILE = os.getenv("DEBUG_LOG_FILE", "debug.log")
+
+
 def debug_log(message: str, config: dict | None = None, *, level: str = "high") -> None:
-    """Print debug *message* when the configured level is >= ``level``."""
+    """Write debug *message* to ``LOG_FILE`` when enabled."""
     current = _get_config_level(config)
     ranks = {"low": 1, "medium": 2, "high": 3}
     if ranks.get(current, 1) >= ranks.get(level, 3):
-        print("[DEBUG]", message)
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(f"{message}\n")
