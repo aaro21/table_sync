@@ -65,6 +65,9 @@ python scripts/reconcile_runner.py --record 12345
 Row comparison can optionally use a row hash to skip columns when the
 source and destination rows are identical. Parallel comparison across
 partitions is also supported when enabled in the YAML config.
+When weekly partitions are defined for a month, all weeks are processed
+concurrently. Queries for the next week wait until the previous week's
+fetch has completed so database load is staggered.
 
 After reconciliation, mismatches can be applied back to the destination
 table using:
