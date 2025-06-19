@@ -19,6 +19,8 @@ from logic.comparator import compare_row_pairs
 from logic.reporter import DiscrepancyWriter
 from utils.logger import debug_log
 from utils import format_partition
+from utils.system_resources import get_optimal_worker_count
+import psutil
 from tqdm import tqdm
 from collections import defaultdict
 import threading
@@ -287,6 +289,14 @@ def main():
 
     debug_log("Starting reconciliation run", config, level="low")
 
+    comparison_cfg = config.get("comparison", {})
+    workers = comparison_cfg.get("workers")
+    if not workers or workers == "auto":
+        workers = get_optimal_worker_count()
+        debug_log(f"CPU cores: {os.cpu_count()}, Available RAM: {psutil.virtual_memory().available / (1024**3):.2f} GB", config)
+        debug_log(f"Auto-detected optimal worker count: {workers}", config)
+    comparison_cfg["workers"] = workers
+
     src_env = config["source"]["resolved_env"]
     dest_env = config["destination"]["resolved_env"]
     src_schema = config["source"].get("schema", "")
@@ -311,7 +321,7 @@ def main():
     try:
         sample: list[tuple[Any, dict]] = []
         seen_pks: set[Any] = set()
-        workers = config.get("comparison", {}).get("workers", 4)
+        workers = comparison_cfg.get("workers", 4)
         partitions = list(get_partitions(config))
 
         groups: dict[tuple[str, str], list[dict]] = defaultdict(list)
