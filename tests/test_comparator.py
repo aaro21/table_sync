@@ -1,5 +1,10 @@
 import sys, os; sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from logic.comparator import compare_rows, compute_row_hash, compare_row_pairs
+from logic.comparator import (
+    compare_rows,
+    compute_row_hash,
+    compare_row_pairs,
+    discard_matching_rows_by_hash,
+)
 from decimal import Decimal
 
 
@@ -129,3 +134,23 @@ def test_compare_row_pairs_parallel_batch():
     results = list(compare_row_pairs(pairs, workers=2))
     assert len(results) == 1
     assert results[0]["primary_key"] == 2
+
+
+def test_discard_matching_rows_by_hash():
+    src_rows = [{"id": i, "val": i} for i in range(1000)]
+    dest_rows = [{"id": i, "val": i} for i in range(500)] + [
+        {"id": i, "val": i + 1} for i in range(500, 1000)
+    ]
+
+    filtered_src, filtered_dest, discarded, kept = discard_matching_rows_by_hash(
+        src_rows,
+        dest_rows,
+        "id",
+        workers=1,
+    )
+
+    assert discarded == 500
+    assert kept == 500
+    assert len(filtered_src) == len(filtered_dest) == 500
+    assert filtered_src[0]["id"] == 500
+    assert filtered_dest[0]["id"] == 500
