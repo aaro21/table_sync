@@ -65,7 +65,7 @@ def fix_mismatches(config: Dict, *, dry_run: Optional[bool] = None) -> None:
 
                 if partition.get("week"):
                     part_params.append(partition["week"])
-                    where_clauses.append("src.[week] = ?")
+                    where_clauses.append("[week] = ?")
 
                 debug_log(f"Processing partition {partition}", config, level="low")
 
@@ -163,7 +163,7 @@ def main() -> None:
     parser.add_argument("--apply", action="store_true", help="execute updates instead of dry run")
     args = parser.parse_args()
 
-    config = load_config(config_path="config/config.yaml")
+    config = load_config("config/config.yaml")
     dry_run = not args.apply
 
     fix_mismatches(config, dry_run=dry_run)
