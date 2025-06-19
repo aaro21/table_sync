@@ -35,8 +35,9 @@ written to a table on the destination SQL Server.
    file.
 
 Passing the `--debug` flag or setting a debug level in the YAML
-configuration enables logging output. Supported levels are `low`,
-`medium` and `high`, where `high` produces the most verbose output.
+configuration enables logging output written to `debug.log` in the project
+root. Supported levels are `low`, `medium` and `high`, where `high` produces
+the most verbose output.
 
 To limit the number of rows fetched during testing, pass the `--limit`
 option to `reconcile_runner.py`:

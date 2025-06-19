@@ -61,6 +61,7 @@ def process_partition(
     """Process a single partition using its own database connections."""
 
     start_event.wait()
+    pbar.set_description(f"mismatches {format_partition(partition)}")
     with get_oracle_connection(src_env, config) as src_conn, get_sqlserver_connection(dest_env, config) as dest_conn:
         dest_conn.cursor().fast_executemany = True
         with ThreadPoolExecutor(max_workers=2) as executor:
@@ -128,7 +129,11 @@ def process_partition(
             def row_pairs():
                 use_bar = total_rows <= 1000
                 bar_ctx = (
-                    tqdm(total=total_rows, desc="processing row pairs", unit="row")
+                    tqdm(
+                        total=total_rows,
+                        desc=f"rows {format_partition(partition)}",
+                        unit="row",
+                    )
                     if use_bar
                     else nullcontext()
                 )
