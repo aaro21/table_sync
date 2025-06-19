@@ -6,6 +6,7 @@ from datetime import datetime
 """Functions for comparing row dictionaries between databases."""
 
 from typing import Any, Iterable, Optional, Tuple, List
+import gc
 import xxhash
 from itertools import islice, chain
 from pqdm.processes import pqdm
@@ -160,13 +161,15 @@ def _filter_pairs_by_hash(
                 result.append(pair)
         return result
 
-    # Materialize chunks for tqdm progress bar
-    chunks = list(_chunked(row_pairs, chunk_size))
+    # Stream chunks to avoid materializing all pairs at once
     for i, chunk in enumerate(
-        tqdm(chunks, desc="Filtering mismatched row hashes", unit="chunk")
+        tqdm(_chunked(row_pairs, chunk_size), desc="Filtering mismatched row hashes", unit="chunk")
     ):
         for pair in process(chunk, i):
             yield pair
+        # Explicitly free memory from processed chunk
+        del chunk
+        gc.collect()
 
 
 def values_equal(source_val: Any, dest_val: Any) -> bool:
