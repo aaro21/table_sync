@@ -17,6 +17,7 @@ from runners.reconcile import fetch_rows
 from logic.comparator import compare_row_pairs
 from logic.reporter import DiscrepancyWriter
 from utils.logger import debug_log
+from utils import format_partition
 from tqdm import tqdm
 
 from scripts.fix_mismatches import main as fix_mismatches_main
@@ -110,6 +111,7 @@ def main():
                 partitions = list(get_partitions(config))
                 with tqdm(total=len(partitions), desc="partitions", unit="part") as partbar, tqdm(desc="mismatches found", unit="row") as pbar:
                     for partition in partitions:
+                        partbar.set_postfix_str(format_partition(partition))
                         partbar.update(1)
                         debug_log(
                             f"Partition: {partition}",
@@ -176,6 +178,8 @@ def main():
                                 else nullcontext()
                             )
                             with bar_ctx as progress:
+                                if use_bar:
+                                    progress.set_postfix_str(format_partition(partition))
                                 nonlocal src_row, dest_row
                                 while src_row is not None or dest_row is not None:
                                     if src_row is not None:

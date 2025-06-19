@@ -12,6 +12,7 @@ from logic.partitioner import get_partitions
 from logic.config_loader import load_config
 from connectors.sqlserver_connector import get_sqlserver_connection
 from utils.logger import debug_log
+from utils import format_partition
 from tqdm import tqdm
 
 
@@ -53,6 +54,7 @@ def fix_mismatches(config: Dict, *, dry_run: Optional[bool] = None) -> None:
         partitions = list(get_partitions(config)) or [{}]
         with tqdm(total=len(partitions), desc="partitions", unit="part") as part_bar:
             for partition in partitions:
+                part_bar.set_postfix_str(format_partition(partition))
                 part_bar.update(1)
                 part_params = []
                 where_clauses = ["[type] = 'mismatch'"]
@@ -76,6 +78,7 @@ def fix_mismatches(config: Dict, *, dry_run: Optional[bool] = None) -> None:
                 columns_to_update = [row[0] for row in cur.fetchall()]
 
                 with tqdm(columns_to_update, desc="columns", unit="col", leave=False) as col_bar:
+                    col_bar.set_postfix_str(format_partition(partition))
                     for col in columns_to_update:
                         dest_column = dest_cols.get(col, col)
 
