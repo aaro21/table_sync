@@ -5,6 +5,7 @@ from typing import Any
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 import subprocess
+import sys
 import os
 import json
 
@@ -17,6 +18,8 @@ from logic.comparator import compare_row_pairs
 from logic.reporter import DiscrepancyWriter
 from utils.logger import debug_log
 from tqdm import tqdm
+
+from scripts.fix_mismatches import main as fix_mismatches_main
 
 
 def fetch_all_rows(**kwargs):
@@ -262,12 +265,21 @@ def main():
                     }
 
                     debug_log(f"Running fix_mismatches.py for partition: {partition_env}", config, level="low")
+                    
+                    # Directly call fix_mismatches.py main function with appropriate environment and sys.argv
+                    original_environ = os.environ.copy()
+                    os.environ.update(partition_env)
 
-                    subprocess.run(
-                        ["python", "scripts/fix_mismatches.py", "--config-path", args.config],
-                        check=True,
-                        env={**os.environ, **partition_env},
-                    )
+                    sys.argv = [
+                        "fix_mismatches",
+                        "--config-path",
+                        args.config,
+                    ]
+
+                    fix_mismatches_main()
+
+                    os.environ.clear()
+                    os.environ.update(original_environ)
 
                 for pk, diff in sample:
                     debug_log(
