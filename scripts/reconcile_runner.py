@@ -3,7 +3,7 @@
 import argparse
 from typing import Any
 from concurrent.futures import ThreadPoolExecutor
-from pqdm.processes import pqdm
+from pqdm.threads import pqdm as pqdm_threads
 from contextlib import nullcontext
 import subprocess
 import sys
@@ -22,7 +22,6 @@ from utils import format_partition
 from utils.system_resources import get_optimal_worker_count
 import psutil
 from tqdm import tqdm
-from collections import defaultdict
 import threading
 
 from scripts.fix_mismatches import main as fix_mismatches_main
@@ -316,7 +315,6 @@ def main():
     src_dialect = config["source"].get("type", "sqlserver").lower()
     dest_dialect = config["destination"].get("type", "sqlserver").lower()
     use_row_hash = config.get("comparison", {}).get("use_row_hash", False)
-    use_parallel = config.get("comparison", {}).get("parallel", False)
 
     try:
         sample: list[tuple[Any, dict]] = []
@@ -324,94 +322,49 @@ def main():
         workers = comparison_cfg.get("workers", 4)
         partitions = list(get_partitions(config))
 
-        groups: dict[tuple[str, str], list[dict]] = defaultdict(list)
-        order: list[tuple[str, str]] = []
-        for part in partitions:
-            key = (part["year"], part["month"])
-            if key not in groups:
-                order.append(key)
-            groups[key].append(part)
+        with tqdm(desc="mismatches found", unit="row") as pbar:
+            events = [threading.Event() for _ in range(len(partitions) + 1)]
+            events[0].set()
 
-        with tqdm(total=len(partitions), desc="partitions", unit="part") as partbar, tqdm(desc="mismatches found", unit="row") as pbar:
-            for key in order:
-                parts = groups[key]
-                if len(parts) > 1 and all("week" in p for p in parts):
-                    start_event = threading.Event()
-                    start_event.set()
-                    with ThreadPoolExecutor(max_workers=len(parts)) as executor:
-                        futures = []
-                        prev = start_event
-                        for p in parts:
-                            partbar.set_postfix_str(format_partition(p))
-                            partbar.update(1)
-                            next_evt = threading.Event()
-                            futures.append(
-                                executor.submit(
-                                    process_partition,
-                                    p,
-                                    config,
-                                    src_env,
-                                    dest_env,
-                                    src_schema=src_schema,
-                                    dest_schema=dest_schema,
-                                    src_table=src_table,
-                                    dest_table=dest_table,
-                                    src_cols=src_cols,
-                                    dest_cols=dest_cols,
-                                    primary_key=primary_key,
-                                    output_schema=output_schema,
-                                    output_table=output_table,
-                                    year_column=year_column,
-                                    month_column=month_column,
-                                    week_column=week_column,
-                                    src_dialect=src_dialect,
-                                    dest_dialect=dest_dialect,
-                                    workers=workers,
-                                    pbar=pbar,
-                                    use_row_hash=use_row_hash,
-                                    sample=sample,
-                                    seen_pks=seen_pks,
-                                    start_event=prev,
-                                    done_event=next_evt,
-                                )
-                            )
-                            prev = next_evt
-                        for fut in futures:
-                            fut.result()
-                else:
-                    for p in parts:
-                        partbar.set_postfix_str(format_partition(p))
-                        partbar.update(1)
-                        start_evt = threading.Event()
-                        start_evt.set()
-                        done_evt = threading.Event()
-                        process_partition(
-                            p,
-                            config,
-                            src_env,
-                            dest_env,
-                            src_schema=src_schema,
-                            dest_schema=dest_schema,
-                            src_table=src_table,
-                            dest_table=dest_table,
-                            src_cols=src_cols,
-                            dest_cols=dest_cols,
-                            primary_key=primary_key,
-                            output_schema=output_schema,
-                            output_table=output_table,
-                            year_column=year_column,
-                            month_column=month_column,
-                            week_column=week_column,
-                            src_dialect=src_dialect,
-                            dest_dialect=dest_dialect,
-                            workers=workers,
-                            pbar=pbar,
-                            use_row_hash=use_row_hash,
-                            sample=sample,
-                            seen_pks=seen_pks,
-                            start_event=start_evt,
-                            done_event=done_evt,
-                        )
+            tasks = []
+            for idx, part in enumerate(partitions):
+                tasks.append(
+                    {
+                        "partition": part,
+                        "config": config,
+                        "src_env": src_env,
+                        "dest_env": dest_env,
+                        "src_schema": src_schema,
+                        "dest_schema": dest_schema,
+                        "src_table": src_table,
+                        "dest_table": dest_table,
+                        "src_cols": src_cols,
+                        "dest_cols": dest_cols,
+                        "primary_key": primary_key,
+                        "output_schema": output_schema,
+                        "output_table": output_table,
+                        "year_column": year_column,
+                        "month_column": month_column,
+                        "week_column": week_column,
+                        "src_dialect": src_dialect,
+                        "dest_dialect": dest_dialect,
+                        "workers": workers,
+                        "pbar": pbar,
+                        "use_row_hash": use_row_hash,
+                        "sample": sample,
+                        "seen_pks": seen_pks,
+                        "start_event": events[idx],
+                        "done_event": events[idx + 1],
+                    }
+                )
+
+            pqdm_threads(
+                tasks,
+                n_jobs=len(partitions),
+                argument_type="kwargs",
+                function=process_partition,
+                desc="partitions",
+            )
 
         for pk, diff in sample:
             debug_log(

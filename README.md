@@ -80,7 +80,7 @@ This script updates only the differing columns and accepts a `--no-dry-run`
 flag when you want to preview the SQL statements.
 
 This repository remains intentionally small but now includes simple
-logging via `utils.logger`, tqdm progress bars and a suite of unit tests.
+logging via `utils.logger`, progress bars driven by `pqdm` and a suite of unit tests.
 Retry logic and advanced error handling are still out of scope to keep
 the example focused on reconciliation.
 
