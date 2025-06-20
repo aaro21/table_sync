@@ -62,12 +62,9 @@ def process_partition(
     use_row_hash: bool,
     sample: list,
     seen_pks: set,
-    start_event: threading.Event,
-    done_event: threading.Event,
 ) -> None:
     """Process a single partition using its own database connections."""
 
-    start_event.wait()
     part_label = format_partition(partition)
     debug_log(
         f"Partition {part_label} started at {datetime.now().isoformat()}",
@@ -284,8 +281,7 @@ def process_partition(
             level="low",
         )
     finally:
-        # Always allow the next partition to start
-        done_event.set()
+        pass
 
 
 if __name__ == "__main__":
@@ -378,9 +374,6 @@ def main():
         partitions = list(get_partitions(config))
 
         with tqdm(desc="mismatches found", unit="row") as pbar:
-            events = [threading.Event() for _ in range(len(partitions) + 1)]
-            events[0].set()
-
             tasks = []
             for idx, part in enumerate(partitions):
                 tasks.append(
@@ -408,19 +401,16 @@ def main():
                         "use_row_hash": use_row_hash,
                         "sample": sample,
                         "seen_pks": seen_pks,
-                        "start_event": events[idx],
-                        "done_event": events[idx + 1],
                     }
                 )
 
-            debug_log(f"Launching process pool with {min(len(partitions), workers)} workers", config, level="medium")
-            pqdm_processes(
-                tasks,
-                n_jobs=min(len(partitions), workers),
-                argument_type="kwargs",
-                function=process_partition,
-                desc="partitions",
-            )
+            from concurrent.futures import ThreadPoolExecutor
+
+            debug_log(f"Launching thread pool with {min(len(partitions), workers)} workers", config, level="medium")
+            with ThreadPoolExecutor(max_workers=min(len(partitions), workers)) as executor:
+                futures = [executor.submit(process_partition, **args) for args in tasks]
+                for future in futures:
+                    future.result()
 
         for pk, diff in sample:
             debug_log(
