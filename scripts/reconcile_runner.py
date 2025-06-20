@@ -77,9 +77,8 @@ def process_partition(
     try:
         with get_oracle_connection(src_env, config) as src_conn, get_sqlserver_connection(dest_env, config) as dest_conn:
             dest_conn.cursor().fast_executemany = True
-            with ThreadPoolExecutor(max_workers=2) as executor:
-                future_src = executor.submit(
-                    fetch_all_rows,
+            try:
+                src_rows = fetch_all_rows(
                     conn=src_conn,
                     schema=src_schema,
                     table=src_table,
@@ -94,8 +93,12 @@ def process_partition(
                     limit=config.get("limit"),
                     pk_value=config.get("record_pk"),
                 )
-                future_dest = executor.submit(
-                    fetch_all_rows,
+            except Exception as e:
+                debug_log(f"[ERROR] Failed to fetch source rows: {e}", config, level="low")
+                raise
+
+            try:
+                dest_rows = fetch_all_rows(
                     conn=dest_conn,
                     schema=dest_schema,
                     table=dest_table,
@@ -110,18 +113,9 @@ def process_partition(
                     limit=config.get("limit"),
                     pk_value=config.get("record_pk"),
                 )
-
-                try:
-                    src_rows = future_src.result()
-                except Exception as e:
-                    debug_log(f"[ERROR] Failed to fetch source rows: {e}", config, level="low")
-                    raise
-
-                try:
-                    dest_rows = future_dest.result()
-                except Exception as e:
-                    debug_log(f"[ERROR] Failed to fetch destination rows: {e}", config, level="low")
-                    raise
+            except Exception as e:
+                debug_log(f"[ERROR] Failed to fetch destination rows: {e}", config, level="low")
+                raise
 
         debug_log(
             f"Fetched {len(src_rows)} source rows and {len(dest_rows)} destination rows",
