@@ -75,46 +75,46 @@ def process_partition(
     pbar.set_description(f"mismatches {part_label}")
     src_rows = dest_rows = []
     try:
-        # Fetch source rows first, then destination rows, to avoid overwhelming the database server.
-        with get_oracle_connection(src_env, config) as src_conn:
+        # Fetch source and destination rows concurrently using ThreadPoolExecutor.
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future_src = executor.submit(lambda: list(fetch_all_rows(
+                conn=get_oracle_connection(src_env, config).__enter__(),
+                schema=src_schema,
+                table=src_table,
+                columns=src_cols,
+                partition=partition,
+                primary_key=primary_key,
+                year_column=year_column,
+                month_column=month_column,
+                dialect=src_dialect,
+                week_column=week_column,
+                config=config,
+                limit=config.get("limit"),
+                pk_value=config.get("record_pk"),
+            )))
+            future_dest = executor.submit(lambda: list(fetch_all_rows(
+                conn=get_sqlserver_connection(dest_env, config).__enter__(),
+                schema=dest_schema,
+                table=dest_table,
+                columns=dest_cols,
+                partition=partition,
+                primary_key=primary_key,
+                year_column=year_column,
+                month_column=month_column,
+                dialect=dest_dialect,
+                week_column=week_column,
+                config=config,
+                limit=config.get("limit"),
+                pk_value=config.get("record_pk"),
+            )))
             try:
-                src_rows = fetch_all_rows(
-                    conn=src_conn,
-                    schema=src_schema,
-                    table=src_table,
-                    columns=src_cols,
-                    partition=partition,
-                    primary_key=primary_key,
-                    year_column=year_column,
-                    month_column=month_column,
-                    dialect=src_dialect,
-                    week_column=week_column,
-                    config=config,
-                    limit=config.get("limit"),
-                    pk_value=config.get("record_pk"),
-                )
+                src_rows = future_src.result()
             except Exception as e:
                 debug_log(f"[ERROR] Failed to fetch source rows: {e}", config, level="low")
                 raise
-
-        with get_sqlserver_connection(dest_env, config) as dest_conn:
-            dest_conn.cursor().fast_executemany = True
             try:
-                dest_rows = fetch_all_rows(
-                    conn=dest_conn,
-                    schema=dest_schema,
-                    table=dest_table,
-                    columns=dest_cols,
-                    partition=partition,
-                    primary_key=primary_key,
-                    year_column=year_column,
-                    month_column=month_column,
-                    dialect=dest_dialect,
-                    week_column=week_column,
-                    config=config,
-                    limit=config.get("limit"),
-                    pk_value=config.get("record_pk"),
-                )
+                dest_rows = future_dest.result()
             except Exception as e:
                 debug_log(f"[ERROR] Failed to fetch destination rows: {e}", config, level="low")
                 raise
@@ -141,7 +141,8 @@ def process_partition(
                 level="medium",
             )
 
-        with DiscrepancyWriter(dest_conn, output_schema, output_table) as writer:
+        # Re-establish destination connection for writing, as previous connection was closed after fetching.
+        with get_sqlserver_connection(dest_env, config) as dest_conn, DiscrepancyWriter(dest_conn, output_schema, output_table) as writer:
 
             def write_record(record: dict) -> None:
                 debug_log(f"WRITING: {record}", config, level="medium")
