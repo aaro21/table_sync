@@ -73,47 +73,46 @@ def process_partition(
     )
     part_start = time.perf_counter()
     pbar.set_description(f"mismatches {part_label}")
-    with get_oracle_connection(src_env, config) as src_conn, get_sqlserver_connection(dest_env, config) as dest_conn:
-        dest_conn.cursor().fast_executemany = True
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            future_src = executor.submit(
-                fetch_all_rows,
-                conn=src_conn,
-                schema=src_schema,
-                table=src_table,
-                columns=src_cols,
-                partition=partition,
-                primary_key=primary_key,
-                year_column=year_column,
-                month_column=month_column,
-                dialect=src_dialect,
-                week_column=week_column,
-                config=config,
-                limit=config.get("limit"),
-                pk_value=config.get("record_pk"),
-            )
-            future_dest = executor.submit(
-                fetch_all_rows,
-                conn=dest_conn,
-                schema=dest_schema,
-                table=dest_table,
-                columns=dest_cols,
-                partition=partition,
-                primary_key=primary_key,
-                year_column=year_column,
-                month_column=month_column,
-                dialect=dest_dialect,
-                week_column=week_column,
-                config=config,
-                limit=config.get("limit"),
-                pk_value=config.get("record_pk"),
-            )
+    src_rows = dest_rows = []
+    try:
+        with get_oracle_connection(src_env, config) as src_conn, get_sqlserver_connection(dest_env, config) as dest_conn:
+            dest_conn.cursor().fast_executemany = True
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                future_src = executor.submit(
+                    fetch_all_rows,
+                    conn=src_conn,
+                    schema=src_schema,
+                    table=src_table,
+                    columns=src_cols,
+                    partition=partition,
+                    primary_key=primary_key,
+                    year_column=year_column,
+                    month_column=month_column,
+                    dialect=src_dialect,
+                    week_column=week_column,
+                    config=config,
+                    limit=config.get("limit"),
+                    pk_value=config.get("record_pk"),
+                )
+                future_dest = executor.submit(
+                    fetch_all_rows,
+                    conn=dest_conn,
+                    schema=dest_schema,
+                    table=dest_table,
+                    columns=dest_cols,
+                    partition=partition,
+                    primary_key=primary_key,
+                    year_column=year_column,
+                    month_column=month_column,
+                    dialect=dest_dialect,
+                    week_column=week_column,
+                    config=config,
+                    limit=config.get("limit"),
+                    pk_value=config.get("record_pk"),
+                )
 
-            src_rows = future_src.result()
-            dest_rows = future_dest.result()
-
-        # Signal that queries for this partition have completed
-        done_event.set()
+                src_rows = future_src.result()
+                dest_rows = future_dest.result()
 
         debug_log(
             f"Fetched {len(src_rows)} source rows and {len(dest_rows)} destination rows",
@@ -267,11 +266,14 @@ def process_partition(
         os.environ.clear()
         os.environ.update(original_environ)
 
-    debug_log(
-        f"Partition {part_label} finished in {time.perf_counter() - part_start:.2f}s",
-        config,
-        level="low",
-    )
+        debug_log(
+            f"Partition {part_label} finished in {time.perf_counter() - part_start:.2f}s",
+            config,
+            level="low",
+        )
+    finally:
+        # Always allow the next partition to start
+        done_event.set()
 
 
 def main():
