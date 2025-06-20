@@ -114,8 +114,17 @@ def process_partition(
                     pk_value=config.get("record_pk"),
                 )
 
-                src_rows = future_src.result()
-                dest_rows = future_dest.result()
+                try:
+                    src_rows = future_src.result()
+                except Exception as e:
+                    debug_log(f"[ERROR] Failed to fetch source rows: {e}", config, level="low")
+                    raise
+
+                try:
+                    dest_rows = future_dest.result()
+                except Exception as e:
+                    debug_log(f"[ERROR] Failed to fetch destination rows: {e}", config, level="low")
+                    raise
 
         debug_log(
             f"Fetched {len(src_rows)} source rows and {len(dest_rows)} destination rows",
