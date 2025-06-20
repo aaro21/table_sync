@@ -62,12 +62,17 @@ def _hash_row(row: dict) -> str:
 
 
 def compute_row_hashes_parallel(
-    rows: list[dict], *, workers: int = 4, mode: str = "thread"
+    rows: list[dict], *, workers: int = 4, mode: str = None
 ) -> list[str]:
     """Compute hashes for rows in parallel using thread or process mode."""
+    if mode is None:
+        mode = "process" if platform.system() == "Windows" else "thread"
+    if mode not in ("thread", "process"):
+        debug_log(f"Unknown parallel mode '{mode}', defaulting to 'thread'", None, level="medium")
+        mode = "thread"
     pq = pqdm_threads if mode == "thread" else pqdm
     debug_log(
-        f"Using {'threads' if mode == 'thread' else 'processes'} for parallel hashing",
+        f"Using {'threads' if mode == 'thread' else 'processes'} for parallel hashing (mode={mode})",
         None,
         level="high",
     )
@@ -130,12 +135,9 @@ def discard_matching_rows_by_hash(
 
 def _chunked(iterable: Iterable, size: int) -> Iterable[list]:
     """Yield lists of *size* elements from *iterable*."""
-    it = iter(iterable)
-    while True:
-        chunk = list(islice(it, size))
-        if not chunk:
-            break
-        yield chunk
+    data = list(iterable)
+    for i in range(0, len(data), size):
+        yield data[i:i + size]
 
 
 def _filter_pairs_by_hash(
@@ -143,13 +145,18 @@ def _filter_pairs_by_hash(
     *,
     workers: int = 4,
     chunk_size: int = 100_000,
-    mode: str = "thread",
+    mode: str = "process" if platform.system() == "Windows" else "thread",
 ) -> Iterable[tuple]:
     """Yield row pairs where source and destination row hashes differ.
 
     ``mode`` selects ``"thread"`` or ``"process"`` execution for hash
     computation.
     """
+    debug_log(
+        f"_filter_pairs_by_hash using mode={mode}",
+        None,
+        level="high",
+    )
 
     def process(chunk: list[tuple], chunk_idx: int) -> list[tuple]:
         debug_log(
@@ -169,7 +176,7 @@ def _filter_pairs_by_hash(
 
     # Stream chunks to avoid materializing all pairs at once
     for i, chunk in enumerate(
-        tqdm(_chunked(row_pairs, chunk_size), desc="Filtering mismatched row hashes", unit="chunk")
+        tqdm(_chunked(list(row_pairs), chunk_size), desc="Filtering mismatched row hashes", unit="chunk")
     ):
         for pair in process(chunk, i):
             yield pair
@@ -542,6 +549,7 @@ def compare_row_pairs_parallel_detailed(
     # If progress is not None and total is None, try to estimate total
     # This is not possible without materializing, so skip.
 
+    debug_log(f"Executor: {'ThreadPoolExecutor' if parallel_mode == 'thread' else 'ProcessPoolExecutor'} with {workers} workers", cfg_ref, level="medium")
     executor_cls = ThreadPoolExecutor if parallel_mode == "thread" else ProcessPoolExecutor
     if parallel_mode == "process" and platform.system() == "Windows":
         mp.freeze_support()
@@ -572,7 +580,7 @@ def compare_row_pairs_parallel_batch(
     workers: int = 4,
     progress=None,
     chunk_size: int = 100_000,
-    parallel_mode: str = "thread",
+    parallel_mode: str = "process" if platform.system() == "Windows" else "thread",
 ) -> Iterable[dict]:
     """Filter row pairs by hash in chunks then compare mismatched pairs.
 
@@ -580,7 +588,11 @@ def compare_row_pairs_parallel_batch(
     processes. Accepted values mirror those of
     :func:`compare_row_pairs_parallel_detailed`.
     """
-
+    debug_log(
+        f"compare_row_pairs_parallel_batch using parallel_mode={parallel_mode}",
+        None,
+        level="high",
+    )
     filtered = _filter_pairs_by_hash(
         row_pairs, workers=workers, chunk_size=chunk_size, mode=parallel_mode
     )

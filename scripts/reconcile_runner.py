@@ -1,9 +1,12 @@
 """Command line entry point for running table reconciliation."""
 
+import multiprocessing
+multiprocessing.freeze_support()
+
 import argparse
 from typing import Any
 from concurrent.futures import ThreadPoolExecutor
-from pqdm.threads import pqdm as pqdm_threads
+from pqdm.processes import pqdm as pqdm_processes
 from contextlib import nullcontext
 import subprocess
 import sys
@@ -276,6 +279,9 @@ def process_partition(
         done_event.set()
 
 
+if __name__ == "__main__":
+    multiprocessing.freeze_support()
+
 def main():
     """Run the reconciliation process based on ``config/config.yaml``."""
 
@@ -398,9 +404,10 @@ def main():
                     }
                 )
 
-            pqdm_threads(
+            debug_log(f"Launching process pool with {min(len(partitions), workers)} workers", config, level="medium")
+            pqdm_processes(
                 tasks,
-                n_jobs=len(partitions),
+                n_jobs=min(len(partitions), workers),
                 argument_type="kwargs",
                 function=process_partition,
                 desc="partitions",
