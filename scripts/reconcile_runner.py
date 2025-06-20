@@ -75,8 +75,8 @@ def process_partition(
     pbar.set_description(f"mismatches {part_label}")
     src_rows = dest_rows = []
     try:
-        with get_oracle_connection(src_env, config) as src_conn, get_sqlserver_connection(dest_env, config) as dest_conn:
-            dest_conn.cursor().fast_executemany = True
+        # Fetch source rows first, then destination rows, to avoid overwhelming the database server.
+        with get_oracle_connection(src_env, config) as src_conn:
             try:
                 src_rows = fetch_all_rows(
                     conn=src_conn,
@@ -97,6 +97,8 @@ def process_partition(
                 debug_log(f"[ERROR] Failed to fetch source rows: {e}", config, level="low")
                 raise
 
+        with get_sqlserver_connection(dest_env, config) as dest_conn:
+            dest_conn.cursor().fast_executemany = True
             try:
                 dest_rows = fetch_all_rows(
                     conn=dest_conn,
