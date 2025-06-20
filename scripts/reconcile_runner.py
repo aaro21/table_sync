@@ -401,13 +401,9 @@ def main():
                     }
                 )
 
-            from concurrent.futures import ThreadPoolExecutor
-
-            debug_log(f"Launching thread pool with {min(len(partitions), workers)} workers", config, level="medium")
-            with ThreadPoolExecutor(max_workers=min(len(partitions), workers)) as executor:
-                futures = [executor.submit(process_partition, **args) for args in tasks]
-                for future in futures:
-                    future.result()
+            debug_log(f"Processing partitions sequentially", config, level="medium")
+            for task in tasks:
+                process_partition(**task)
 
         for pk, diff in sample:
             debug_log(
