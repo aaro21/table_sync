@@ -8,6 +8,9 @@ from datetime import datetime
 from typing import Any, Iterable, Optional, Tuple, List
 import gc
 import xxhash
+import multiprocessing as mp
+import platform
+import os
 from itertools import islice, chain
 from pqdm.processes import pqdm
 from pqdm.threads import pqdm as pqdm_threads
@@ -21,6 +24,9 @@ from dateutil import parser
 
 from utils.logger import debug_log
 from tqdm import tqdm
+
+if platform.system() == "Windows":
+    mp.freeze_support()
 import pandas as pd
 
 
@@ -448,9 +454,9 @@ def compare_row_pairs_serial(
             results.append(mismatch)
         return results
 
-    with ThreadPoolExecutor() as executor:
-        future_to_col = {executor.submit(compare_column, col): col for col in columns}
-        for future in future_to_col:
+    with ThreadPoolExecutor(max_workers=min(len(columns), (os.cpu_count() or 1))) as executor:
+        futures = [executor.submit(compare_column, col) for col in columns]
+        for future in as_completed(futures):
             results = future.result()
             mismatches.extend(results)
             if progress is not None:
@@ -537,6 +543,8 @@ def compare_row_pairs_parallel_detailed(
     # This is not possible without materializing, so skip.
 
     executor_cls = ThreadPoolExecutor if parallel_mode == "thread" else ProcessPoolExecutor
+    if parallel_mode == "process" and platform.system() == "Windows":
+        mp.freeze_support()
     with executor_cls(max_workers=workers) as executor:
         futures = [
             executor.submit(compare_row_pair_by_pk, **kwargs)
